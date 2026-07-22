@@ -11,10 +11,14 @@ Board::Board(std::vector<Space> spaces) : spaces_(std::move(spaces)) {
 
 const std::vector<Space>& Board::spaces() const { return spaces_; }
 
-const Space* Board::space(int id) const {
-    return findSpace(id);
+const Space& Board::space(int id) const 
+{
+    const Space* found = findSpace(id);
+    if (!found) {
+        throw GameException("Unknown board space: " + std::to_string(id));
+    }
+    return *found;
 }
-
 bool Board::contains(int id) const {
     return findSpace(id) != nullptr;
 }
@@ -43,7 +47,7 @@ int Board::startSpaceForSlot(int slot) const {
     for (const auto& s : spaces_) {
         if (s.startSlot() == slot) return s.id();
     }
-    return -1; 
+    throw GameException("Start slot not available: " + std::to_string(slot));
 }
 
 std::vector<int> Board::secretPassageSpaces() const {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "unmatched/Space.hpp"
+#include "unmatched/GameExceptions.hpp"
 #include <vector>
 #include <functional>
 #include <map>
@@ -13,7 +14,7 @@ public:
     explicit Board(std::vector<Space> spaces);
 
     const std::vector<Space>& spaces() const;
-    const Space* space(int id) const;  
+    const Space& space(int id) const; 
     bool contains(int id) const;
     bool areAdjacentForCombat(int left, int right) const;
     bool shareZone(int left, int right) const;
