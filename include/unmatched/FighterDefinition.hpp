@@ -1,5 +1,6 @@
 #pragma once
 
+#include "unmatched/Card.hpp"
 #include <string>
 
 namespace unmatched {

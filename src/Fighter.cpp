@@ -43,7 +43,7 @@ void Fighter::heal(int amount) {
         throw RuleViolation("Healing cannot be negative.");
     }
     if (defeated()) {
-        return; 
+        return;
     }
     health_ = std::min(maxHealth(), health_ + amount);
 }

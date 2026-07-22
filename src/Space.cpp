@@ -16,4 +16,13 @@ const std::vector<int>& Space::adjacent() const { return adjacent_; }
 bool Space::hasSecretPassage() const { return secretPassage_; }
 int Space::startSlot() const { return startSlot_; }
 
+std::string Space::zoneLabel() const {
+    std::string label;
+    for (char zone : zones_) {
+        if (!label.empty()) label += "/";
+        label += zone;
+    }
+    return label;
+}
+
 } // namespace unmatched

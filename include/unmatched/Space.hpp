@@ -17,6 +17,7 @@ public:
     const std::vector<int>& adjacent() const;
     bool hasSecretPassage() const;
     int startSlot() const;
+    std::string zoneLabel() const;
 
 private:
     int id_;
