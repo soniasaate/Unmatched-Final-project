@@ -262,4 +262,309 @@ Element TuiApp::renderMenuLines(const std::vector<std::string>& entries, const s
     return window(text(title), vbox(std::move(rows)));
 }
 
+
+bool TuiApp::OnEvent(Event event) {
+    try {
+        return handleEvent(event);
+    } catch (const GameException& exception) {
+        showError(exception.what());
+        return true;
+    } catch (const std::exception& exception) {
+        showError(std::string("Unexpected error: ") + exception.what());
+        return true;
+    }
+}
+
+bool TuiApp::handleEvent(Event event) {
+    if (state_ == ScreenState::SetupAge) {
+        if (event == Event::Escape) {
+            state_ = ScreenState::MainMenu;
+            resetSelection();
+            return true;
+        }
+        if (event == Event::Backspace) {
+            handleBackspace();
+            return true;
+        }
+        if (event == Event::Return) {
+            handleEnter();
+            return true;
+        }
+        if (event.is_character() && event.character().size() == 1 && std::isdigit(static_cast<unsigned char>(event.character()[0]))) {
+            handleDigit(event.character()[0]);
+            return true;
+        }
+        return false;
+    }
+
+    if (event == Event::Escape) {
+        if (state_ == ScreenState::MainMenu) {
+            screen_.ExitLoopClosure()();
+        } else if (state_ == ScreenState::Help) {
+            state_ = controller_.started() ? ScreenState::Game : ScreenState::MainMenu;
+        } else if (controller_.started()) {
+            state_ = ScreenState::Game;
+        } else {
+            state_ = ScreenState::MainMenu;
+        }
+        resetSelection();
+        return true;
+    }
+    if (event == Event::ArrowUp) {
+        moveSelection(-1);
+        return true;
+    }
+    if (event == Event::ArrowDown) {
+        moveSelection(1);
+        return true;
+    }
+    if (event == Event::Return) {
+        handleEnter();
+        return true;
+    }
+    if (event == Event::Character("q") || event == Event::Character("Q")) {
+        screen_.ExitLoopClosure()();
+        return true;
+    }
+    return false;
+}
+
+void TuiApp::handleEnter() {
+    errorMessage_.clear();
+    switch (state_) {
+        case ScreenState::MainMenu:
+            if (selected_ == 0) {
+                ageStep_ = 0;
+                ageInput_.clear();
+                playerOneAge_ = 0;
+                playerTwoAge_ = 0;
+                state_ = ScreenState::SetupAge;
+            } else if (selected_ == 1) {
+                state_ = ScreenState::Help;
+            } else {
+                screen_.ExitLoopClosure()();
+            }
+            resetSelection();
+            break;
+
+        case ScreenState::Help:
+            state_ = controller_.started() ? ScreenState::Game : ScreenState::MainMenu;
+            resetSelection();
+            break;
+
+        case ScreenState::SetupAge: {
+            if (ageInput_.empty()) {
+                showError("Please enter an age.");
+                return;
+            }
+            int age = std::stoi(ageInput_);
+            if (age <= 0) {
+                showError("Age must be positive.");
+                return;
+            }
+            if (ageStep_ == 0) {
+                playerOneAge_ = age;
+                ageInput_.clear();
+                ageStep_ = 1;
+            } else {
+                playerTwoAge_ = age;
+                state_ = ScreenState::FighterSelect;
+                resetSelection();
+            }
+            break;
+        }
+
+        case ScreenState::FighterSelect:
+            selectedHero_ = selected_ == 0 ? HeroKind::Dracula : HeroKind::Sherlock;
+            state_ = ScreenState::StartSelect;
+            resetSelection();
+            break;
+
+        case ScreenState::StartSelect:
+            selectedStartSlot_ = selected_ == 0 ? 1 : 2;
+            startGameFromSetup();
+            break;
+
+        case ScreenState::Game: {
+            auto entries = currentMenuEntries();
+            if (entries.empty()) {
+                showError("No menu entries available.");
+                return;
+            }
+            if (selected_ < 0 || selected_ >= static_cast<int>(entries.size())) {
+                showError("Invalid selection.");
+                return;
+            }
+            std::string choice = entries.at(static_cast<std::size_t>(selected_));
+            if (choice == "Use Dracula start ability") {
+                pendingFighterIds_.clear();
+                const Fighter& dracula = controller_.currentPlayer().heroFighter();
+                for (const auto& player : controller_.players()) {
+                    for (const auto& fighter : player.fighters()) {
+                        if (!fighter.defeated() && fighter.id() != dracula.id() &&
+                            controller_.board().areAdjacentForCombat(dracula.spaceId(), fighter.spaceId())) {
+                            pendingFighterIds_.push_back(fighter.id());
+                        }
+                    }
+                }
+                if (pendingFighterIds_.empty()) {
+                    showError("No valid targets for Dracula ability.");
+                    return;
+                }
+                state_ = ScreenState::DraculaAbilityTarget;
+                resetSelection();
+            } else if (choice == "Maneuver") {
+                beginManeuverFlow();
+            } else if (choice == "Attack") {
+                beginAttackFlow();
+            } else if (choice == "Scheme") {
+                beginSchemeFlow();
+            } else if (choice == "Discarding Cards") {
+                pendingCardIndexes_.clear();
+                for (int i = 0; i < static_cast<int>(controller_.currentPlayer().hand().size()); ++i) {
+                    pendingCardIndexes_.push_back(i);
+                }
+                if (pendingCardIndexes_.empty()) {
+                    showError("No cards to discard.");
+                    return;
+                }
+                state_ = ScreenState::DiscardCard;
+                resetSelection();
+            } else if (choice == "Help") {
+                state_ = ScreenState::Help;
+                resetSelection();
+            } else if (choice == "Back to main menu") {
+                state_ = ScreenState::MainMenu;
+                resetSelection();
+            }
+            break;
+        }
+
+        case ScreenState::ManeuverBoost: {
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingCardIndexes_.size()) + 1) {
+                showError("Invalid boost selection.");
+                return;
+            }
+            std::optional<int> boostIndex;
+            if (selected_ > 0) {
+                boostIndex = pendingCardIndexes_.at(static_cast<std::size_t>(selected_ - 1));
+            }
+            controller_.beginManeuver(boostIndex.value_or(-1));
+            if (controller_.gameOver()) {
+                openGameScreen();
+                break;
+            }
+            pendingFighterIds_ = controller_.movableCurrentFighterIds();
+            if (pendingFighterIds_.empty()) {
+                controller_.finishManeuver();
+                openGameScreen();
+                break;
+            }
+            state_ = ScreenState::ManeuverFighter;
+            resetSelection();
+            break;
+        }
+
+        case ScreenState::ManeuverFighter: {
+            if (selected_ == 0) {
+                controller_.finishManeuver();
+                openGameScreen();
+                break;
+            }
+            int index = selected_ - 1;
+            if (index < 0 || index >= static_cast<int>(pendingFighterIds_.size())) {
+                showError("Invalid fighter selection.");
+                return;
+            }
+            selectedAttackerId_ = pendingFighterIds_.at(static_cast<std::size_t>(index));
+            pendingSpaces_ = controller_.reachableDestinationsFor(selectedAttackerId_);
+            state_ = ScreenState::ManeuverDestination;
+            resetSelection();
+            break;
+        }
+
+        case ScreenState::ManeuverDestination: {
+            if (selected_ == 0) {
+                controller_.finishCurrentFighter(selectedAttackerId_);
+                pendingFighterIds_ = controller_.movableCurrentFighterIds();
+                if (!pendingFighterIds_.empty()) {
+                    state_ = ScreenState::ManeuverFighter;
+                } else {
+                    controller_.finishManeuver();
+                    openGameScreen();
+                }
+                resetSelection();
+                break;
+            }
+            int index = selected_ - 1;
+            if (index < 0 || index >= static_cast<int>(pendingSpaces_.size())) {
+                showError("Invalid destination.");
+                return;
+            }
+            int destination = pendingSpaces_.at(static_cast<std::size_t>(index));
+            controller_.moveCurrentFighter(selectedAttackerId_, destination);
+
+            if (controller_.remainingMovementForFighter(selectedAttackerId_) > 0) {
+                pendingSpaces_ = controller_.reachableDestinationsFor(selectedAttackerId_);
+                const Fighter* fighter = controller_.findFighterById(selectedAttackerId_);
+                bool hasOther = false;
+                if (fighter) {
+                    for (int s : pendingSpaces_) {
+                        if (s != fighter->spaceId()) { hasOther = true; break; }
+                    }
+                }
+                if (hasOther) {
+                    state_ = ScreenState::ManeuverDestination;
+                    resetSelection();
+                    break;
+                }
+            }
+
+            controller_.finishCurrentFighter(selectedAttackerId_);
+            pendingFighterIds_ = controller_.movableCurrentFighterIds();
+            if (!pendingFighterIds_.empty()) {
+                state_ = ScreenState::ManeuverFighter;
+            } else {
+                controller_.finishManeuver();
+                openGameScreen();
+            }
+            resetSelection();
+            break;
+        }
+
+        default:
+            break;
+    }
+}
+
+void TuiApp::handleDigit(char digit) {
+    if (ageInput_.size() < 3) {
+        ageInput_.push_back(digit);
+        errorMessage_.clear();
+    }
+}
+
+void TuiApp::handleBackspace() {
+    if (!ageInput_.empty()) {
+        ageInput_.pop_back();
+    }
+}
+
+void TuiApp::moveSelection(int delta) {
+    auto entries = currentMenuEntries();
+    if (entries.empty()) {
+        selected_ = 0;
+        return;
+    }
+    int size = static_cast<int>(entries.size());
+    selected_ = (selected_ + delta + size) % size;
+}
+
+void TuiApp::resetSelection() {
+    selected_ = 0;
+}
+
+void TuiApp::showError(const std::string& message) {
+    errorMessage_ = message;
+}
 } // namespace unmatched
