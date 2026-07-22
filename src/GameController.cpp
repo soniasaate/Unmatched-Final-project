@@ -1089,5 +1089,136 @@ void GameController::applyConfirmSuspicion(int chosenIndex) {
     checkDefeatedFighters();
     checkWinner();
 }
+
+
+bool GameController::hasPendingOptionalMovement() const {
+    return !pendingOptionalMovements_.empty();
+}
+
+const PendingMovementChoice& GameController::pendingOptionalMovement() const {
+    if (pendingOptionalMovements_.empty()) {
+        throw RuleViolation("There is no pending optional movement.");
+    }
+    return pendingOptionalMovements_.front();
+}
+
+std::vector<int> GameController::pendingOptionalMovementDestinations() const {
+    const auto& pending = pendingOptionalMovement();
+    return reachableForPlayerFighter(pending.playerIndex, pending.fighterId, pending.maxSteps);
+}
+
+void GameController::resolvePendingOptionalMovement(int destinationSpace) {
+    if (pendingOptionalMovements_.empty()) {
+        throw RuleViolation("There is no pending optional movement.");
+    }
+
+    PendingMovementChoice pending = pendingOptionalMovements_.front();
+    pendingOptionalMovements_.pop_front();
+    Player& player = playerByIndex(pending.playerIndex);
+    Fighter& fighter = player.fighterById(pending.fighterId);
+
+    if (destinationSpace == -1 || fighter.defeated()) {
+        endTurnIfNeeded();
+        return;
+    }
+
+    std::vector<int> destinations = reachableForPlayerFighter(pending.playerIndex, pending.fighterId, pending.maxSteps);
+    if (std::find(destinations.begin(), destinations.end(), destinationSpace) == destinations.end()) {
+        throw RuleViolation("Selected destination is not reachable for the pending movement.");
+    }
+
+    fighter.placeAt(destinationSpace);
+    endTurnIfNeeded();
+}
+
+void GameController::endTurnIfNeeded() {
+    if (gameOver_) return;
+    if (!pendingOptionalMovements_.empty()) return;
+    if (actionsRemaining_ == 0 && currentPlayerMustDiscardToLimit()) return;
+    if (actionsRemaining_ == 0) {
+        advanceTurn();
+    }
+}
+
+bool GameController::currentPlayerMustDiscardToLimit() const {
+    return actionsRemaining_ == 0 && currentPlayer().hand().size() > 7;
+}
+
+void GameController::discardCurrentPlayerCard(int handIndex) {
+    if (!pendingOptionalMovements_.empty()) {
+        throw RuleViolation("Resolve the pending card movement before discarding.");
+    }
+    Player& player = currentPlayer();
+    Card discarded = player.removeCardFromHand(handIndex);
+    player.addToDiscard(std::move(discarded));
+    endTurnIfNeeded();
+}
+
+void GameController::useDraculaStartAbility(const std::string& targetFighterId) {
+    if (!draculaAbilityAvailable()) {
+        throw RuleViolation("Dracula's start ability is not available now.");
+    }
+    Fighter& dracula = currentPlayer().heroFighter();
+    Fighter* target = findFighterById(targetFighterId);
+    if (target == nullptr || target->defeated() || target->id() == dracula.id()) {
+        throw RuleViolation("Choose a living fighter adjacent to Dracula.");
+    }
+    if (!board_.areAdjacentForCombat(dracula.spaceId(), target->spaceId())) {
+        throw RuleViolation("Dracula's ability target must be adjacent to Dracula.");
+    }
+    target->damage(1);
+    drawCard(currentPlayer());
+    draculaAbilityUsed_ = true;
+    checkDefeatedFighters();
+    checkWinner();
+}
+
+std::vector<int> GameController::reachableForPlayerFighter(int playerIndex,
+                                                           const std::string& fighterId,
+                                                           int maxSteps) const {
+    const Player& owner = playerByIndex(playerIndex);
+    const Fighter& fighter = owner.fighterById(fighterId);
+    if (fighter.defeated()) return {};
+
+    auto occupiedByEnemy = [&](int spaceId) {
+        for (const auto& player : players_) {
+            if (player.id() == owner.id()) continue;
+            for (const auto& other : player.fighters()) {
+                if (!other.defeated() && other.spaceId() == spaceId) return true;
+            }
+        }
+        return false;
+    };
+
+    auto occupiedByAny = [&](int spaceId) {
+        for (const auto& player : players_) {
+            for (const auto& other : player.fighters()) {
+                if (!other.defeated() && other.id() != fighter.id() && other.spaceId() == spaceId) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    return board_.reachableSpaces(fighter.spaceId(), maxSteps, occupiedByEnemy, occupiedByAny);
+}
+
+std::map<int, std::string> GameController::occupantTokens() const {
+    std::map<int, std::string> result;
+    for (const auto& player : players_) {
+        for (const auto& fighter : player.fighters()) {
+            if (fighter.defeated()) continue;
+            std::string token;
+            if (fighter.id() == "dracula") token = "D";
+            else if (fighter.id().find("sister") == 0) token = "Si";
+            else if (fighter.id() == "sherlock") token = "H";
+            else if (fighter.id() == "watson") token = "W";
+            else token = "?";
+            result[fighter.spaceId()] = token;
+        }
+    }
+    return result;
+}
 } // namespace unmatched
 
