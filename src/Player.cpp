@@ -1,5 +1,4 @@
 #include "unmatched/Player.hpp"
-#include "unmatched/GameExceptions.hpp"
 
 #include <algorithm>
 #include <utility>

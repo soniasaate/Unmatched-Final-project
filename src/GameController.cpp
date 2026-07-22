@@ -1310,6 +1310,7 @@ int GameController::getMovementCost(const std::string& fighterId, int destinatio
 
     auto costMap = computeReachableWithCost(fighter->spaceId(), it->second, fighterId);
     if (costMap.find(destinationSpace) == costMap.end()) return -1;
+    // توقف روی هم‌رزم ممنوع
     if (isSpaceOccupiedByAlly(destinationSpace, fighterId)) return -1;
     return costMap[destinationSpace];
 }
