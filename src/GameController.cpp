@@ -508,4 +508,59 @@ int GameController::maxMovementPoints() const {
     }
     return total;
 }
+
+
+std::vector<std::string> GameController::legalAttackers() const {
+    std::vector<std::string> result;
+    for (const auto* fighter : currentPlayer().aliveFighters()) {
+        if (!legalAttackCardsFor(fighter->id()).empty() && !legalTargetsFor(fighter->id()).empty()) {
+            result.push_back(fighter->id());
+        }
+    }
+    return result;
+}
+
+std::vector<std::string> GameController::legalTargetsFor(const std::string& attackerId) const {
+    const Fighter& attacker = currentPlayer().fighterById(attackerId);
+    std::vector<std::string> result;
+    for (const auto* target : opponentPlayer().aliveFighters()) {
+        if (canAttackTarget(attacker, *target)) {
+            result.push_back(target->id());
+        }
+    }
+    return result;
+}
+
+std::vector<int> GameController::legalAttackCardsFor(const std::string& attackerId) const {
+    const Fighter& attacker = currentPlayer().fighterById(attackerId);
+    std::vector<int> result;
+    const auto& hand = currentPlayer().hand();
+    for (int i = 0; i < static_cast<int>(hand.size()); ++i) {
+        const Card& card = hand[i];
+        if (card.canAttack() && isCardPlayableBy(card, attacker, currentPlayer())) {
+            result.push_back(i);
+        }
+    }
+    return result;
+}
+
+std::vector<int> GameController::legalDefenseCardsFor(const std::string& defenderId) const {
+    const Fighter& defender = opponentPlayer().fighterById(defenderId);
+    std::vector<int> result;
+    const auto& hand = opponentPlayer().hand();
+    for (int i = 0; i < static_cast<int>(hand.size()); ++i) {
+        const Card& card = hand[i];
+        if (card.canDefend() && isCardPlayableBy(card, defender, opponentPlayer())) {
+            result.push_back(i);
+        }
+    }
+    return result;
+}
+
+std::vector<int> GameController::legalBoostCardIndexes() const {
+    std::vector<int> result(currentPlayer().hand().size());
+    std::iota(result.begin(), result.end(), 0);
+    return result;
+}
 } // namespace unmatched
+
