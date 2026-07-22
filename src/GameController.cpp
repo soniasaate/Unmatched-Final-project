@@ -118,7 +118,6 @@ const Player& GameController::playerByIndex(int index) const {
     return players_[index];
 }
 
-// ====== Helper Methods ======
 bool GameController::isSpaceOccupied(int spaceId) const {
     for (const auto& player : players_) {
         for (const auto& fighter : player.fighters()) {
@@ -348,5 +347,165 @@ void GameController::queueOptionalMovement(int playerIndex, const std::string& f
     if (fighter.defeated()) return;
     PendingMovementChoice choice{playerIndex, fighterId, maxSteps, source};
     pendingOptionalMovements_.push_back(std::move(choice));
+}
+
+
+void GameController::beginManeuver(int boostHandIndex) {
+    if (actionsRemaining_ <= 0) throw RuleViolation("No actions remain.");
+    if (!pendingOptionalMovements_.empty()) throw RuleViolation("Resolve pending movement.");
+
+    Player& player = currentPlayer();
+    drawCard(player);
+    if (gameOver_) { remainingMovementPoints_.clear(); return; }
+
+    int boost = 0;
+    if (boostHandIndex != -1) {
+        Card boosted = player.removeCardFromHand(boostHandIndex);
+        boost = boosted.boost();
+        player.addToDiscard(std::move(boosted));
+    }
+
+    remainingMovementPoints_.clear();
+    for (auto& fighter : player.fighters()) {
+        if (!fighter.defeated()) {
+            int move = fighter.move() + boost;
+            remainingMovementPoints_[fighter.id()] = move;
+        }
+    }
+
+    movedThisManeuver_.clear();
+    finishedFighters_.clear();
+}
+
+std::vector<std::string> GameController::movableCurrentFighterIds() const {
+    std::vector<std::string> result;
+    for (const auto& kv : remainingMovementPoints_) {
+        const std::string& id = kv.first;
+        int remaining = kv.second;
+        if (remaining <= 0) continue;
+        if (isFighterFinished(id)) continue;
+        const Fighter* fighter = findFighterById(id);
+        if (!fighter || fighter->defeated()) continue;
+        auto destinations = reachableDestinationsFor(id);
+        bool hasValid = false;
+        for (int d : destinations) {
+            if (d != fighter->spaceId()) { hasValid = true; break; }
+        }
+        if (hasValid) result.push_back(id);
+    }
+    return result;
+}
+
+std::vector<int> GameController::reachableDestinationsFor(const std::string& fighterId) const {
+    const Fighter* fighter = findFighterById(fighterId);
+    if (!fighter || fighter->defeated()) return {};
+    auto it = remainingMovementPoints_.find(fighterId);
+    if (it == remainingMovementPoints_.end() || it->second <= 0) return {};
+    int maxSteps = it->second;
+
+    auto costMap = computeReachableWithCost(fighter->spaceId(), maxSteps, fighterId);
+    std::vector<int> result;
+    for (const auto& pair : costMap) {
+        int space = pair.first;
+        if (space == fighter->spaceId()) continue;
+        if (isSpaceOccupiedByAlly(space, fighterId)) continue;
+        result.push_back(space);
+    }
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+void GameController::moveCurrentFighter(const std::string& fighterId, int destinationSpace) {
+    Fighter& fighter = currentPlayer().fighterById(fighterId);
+    if (isFighterFinished(fighterId)) {
+        throw RuleViolation("This fighter has finished its movement.");
+    }
+    auto it = remainingMovementPoints_.find(fighterId);
+    if (it == remainingMovementPoints_.end() || it->second <= 0) {
+        throw RuleViolation("No movement points for this fighter.");
+    }
+    int cost = getMovementCost(fighterId, destinationSpace);
+    if (cost <= 0 || cost > it->second) {
+        throw RuleViolation("Destination is not reachable or invalid.");
+    }
+    fighter.placeAt(destinationSpace);
+    it->second -= cost;
+}
+
+void GameController::finishManeuver() {
+    remainingMovementPoints_.clear();
+    movedThisManeuver_.clear();
+    finishedFighters_.clear();
+    --actionsRemaining_;
+    endTurnIfNeeded();
+}
+
+void GameController::finishCurrentFighter(const std::string& fighterId) {
+    finishedFighters_.push_back(fighterId);
+}
+
+int GameController::getMovementCost(const std::string& fighterId, int destinationSpace) const {
+    const Fighter* fighter = findFighterById(fighterId);
+    if (!fighter || fighter->defeated()) return -1;
+    auto it = remainingMovementPoints_.find(fighterId);
+    if (it == remainingMovementPoints_.end() || it->second <= 0) return -1;
+    if (destinationSpace == fighter->spaceId()) return 0;
+    auto costMap = computeReachableWithCost(fighter->spaceId(), it->second, fighterId);
+    if (costMap.find(destinationSpace) == costMap.end()) return -1;
+    if (isSpaceOccupiedByAlly(destinationSpace, fighterId)) return -1;
+    return costMap[destinationSpace];
+}
+
+int GameController::remainingMovementForFighter(const std::string& fighterId) const {
+    auto it = remainingMovementPoints_.find(fighterId);
+    return (it != remainingMovementPoints_.end()) ? it->second : -1;
+}
+
+std::map<int, int> GameController::computeReachableWithCost(int start, int maxSteps,
+                                                            const std::string& fighterId) const {
+    std::map<int, int> cost;
+    std::deque<int> dq;
+    cost[start] = 0;
+    dq.push_back(start);
+
+    while (!dq.empty()) {
+        int current = dq.front();
+        dq.pop_front();
+        int currentCost = cost[current];
+        if (currentCost >= maxSteps) continue;
+
+        for (int neighbor : board_.directNeighbors(current)) {
+            if (isSpaceOccupiedByEnemy(neighbor)) continue;
+            int moveCost = 1;
+            if (isSpaceOccupiedByAlly(neighbor, fighterId)) {
+                moveCost = 2;
+            }
+            int newCost = currentCost + moveCost;
+            if (newCost > maxSteps) continue;
+            if (cost.find(neighbor) != cost.end() && cost[neighbor] <= newCost) continue;
+            cost[neighbor] = newCost;
+            if (moveCost == 1) dq.push_front(neighbor);
+            else dq.push_back(neighbor);
+        }
+    }
+    return cost;
+}
+
+int GameController::pendingMovementPoints() const {
+    int total = 0;
+    for (const auto& kv : remainingMovementPoints_) {
+        if (kv.second > 0) total += kv.second;
+    }
+    return total;
+}
+
+int GameController::maxMovementPoints() const {
+    int total = 0;
+    for (const auto& fighter : currentPlayer().fighters()) {
+        if (!fighter.defeated()) {
+            total += fighter.move();
+        }
+    }
+    return total;
 }
 } // namespace unmatched
