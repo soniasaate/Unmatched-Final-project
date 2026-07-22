@@ -3,6 +3,7 @@
 #include "unmatched/Board.hpp"
 #include "unmatched/Card.hpp"
 #include "unmatched/Fighter.hpp"
+
 #include <vector>
 
 namespace unmatched {
@@ -17,6 +18,9 @@ public:
     std::vector<Card> createDeck(HeroKind hero) const;
 };
 
+class FighterFactory {
+public:
+    std::vector<Fighter> createFighters(HeroKind hero) const;
+};
 
-
-} // namespace unmatched
+}  // namespace unmatched

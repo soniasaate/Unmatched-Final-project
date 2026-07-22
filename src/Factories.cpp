@@ -1,4 +1,5 @@
 #include "unmatched/Factories.hpp"
+
 #include <utility>
 
 namespace unmatched {
@@ -6,8 +7,13 @@ namespace unmatched {
 Board BoardFactory::createBaskervilleManor() const {
     std::vector<Space> spaces;
 
-    auto addSpace = [&](int id, int row, int column, std::vector<char> zones,
-                        std::vector<int> adjacent, bool secret = false, int startSlot = 0) {
+    auto addSpace = [&](int id,
+                        int row,
+                        int column,
+                        std::vector<char> zones,
+                        std::vector<int> adjacent,
+                        bool secret = false,
+                        int startSlot = 0) {
         spaces.emplace_back(id, row, column, std::move(zones), std::move(adjacent), secret, startSlot);
     };
 
@@ -43,6 +49,7 @@ Board BoardFactory::createBaskervilleManor() const {
     addSpace(30, 18, 62, {'e'}, {29, 31}, false, 0);
     addSpace(31, 18, 76, {'p','e'}, {22, 30}, false, 0);
     addSpace(32, 16, 70, {'p'}, {22, 20}, false, 1);
+
 
     return Board(std::move(spaces));
 }
@@ -121,5 +128,18 @@ std::vector<Card> DeckFactory::createDeck(HeroKind hero) const {
     return deck;
 }
 
+std::vector<Fighter> FighterFactory::createFighters(HeroKind hero) const {
+    std::vector<Fighter> fighters;
+    if (hero == HeroKind::Dracula) {
+        fighters.emplace_back(FighterDefinition("dracula", "Dracula", Character::Dracula, true, 13, 2, AttackRange::Melee, "Aggro"));
+        fighters.emplace_back(FighterDefinition("sister1", "Sister I", Character::Sister, false, 1, 2, AttackRange::Melee, "Sidekick"));
+        fighters.emplace_back(FighterDefinition("sister2", "Sister II", Character::Sister, false, 1, 2, AttackRange::Melee, "Sidekick"));
+        fighters.emplace_back(FighterDefinition("sister3", "Sister III", Character::Sister, false, 1, 2, AttackRange::Melee, "Sidekick"));
+    } else {
+        fighters.emplace_back(FighterDefinition("sherlock", "Sherlock Holmes", Character::Sherlock, true, 16, 2, AttackRange::Melee, "Intel"));
+        fighters.emplace_back(FighterDefinition("watson", "Dr. Watson", Character::Watson, false, 8, 2, AttackRange::Ranged, "Support"));
+    }
+    return fighters;
+}
 
-} // namespace unmatched
+}  // namespace unmatched
