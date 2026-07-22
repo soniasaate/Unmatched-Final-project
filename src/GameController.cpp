@@ -118,4 +118,235 @@ const Player& GameController::playerByIndex(int index) const {
     return players_[index];
 }
 
+// ====== Helper Methods ======
+bool GameController::isSpaceOccupied(int spaceId) const {
+    for (const auto& player : players_) {
+        for (const auto& fighter : player.fighters()) {
+            if (!fighter.defeated() && fighter.spaceId() == spaceId) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool GameController::isSpaceOccupiedByEnemy(int spaceId) const {
+    for (const auto& fighter : opponentPlayer().fighters()) {
+        if (!fighter.defeated() && fighter.spaceId() == spaceId) return true;
+    }
+    return false;
+}
+
+bool GameController::isSpaceOccupiedByAlly(int spaceId, const std::string& excludeFighterId) const {
+    for (const auto& fighter : currentPlayer().fighters()) {
+        if (fighter.id() == excludeFighterId) continue;
+        if (!fighter.defeated() && fighter.spaceId() == spaceId) return true;
+    }
+    return false;
+}
+
+bool GameController::isSpaceOccupiedByAny(int spaceId) const {
+    return isSpaceOccupied(spaceId);
+}
+
+bool GameController::isSpaceOccupiedByCurrentEnemy(int spaceId) const {
+    for (const auto& fighter : opponentPlayer().fighters()) {
+        if (!fighter.defeated() && fighter.spaceId() == spaceId) return true;
+    }
+    return false;
+}
+
+void GameController::drawCard(Player& player) {
+    if (player.deck().empty()) {
+        fatigue(player);
+        return;
+    }
+    Card drawn = player.deck().back();
+    player.deck().pop_back();
+    player.addToHand(std::move(drawn));
+}
+
+void GameController::fatigue(Player& player) {
+    for (auto& fighter : player.fighters()) {
+        if (!fighter.defeated()) {
+            fighter.damage(2);
+        }
+    }
+    checkDefeatedFighters();
+    checkWinner();
+}
+
+void GameController::placeSidekicks(Player& player) {
+    std::vector<int> free = freeSpacesSharingHeroZone(player);
+    for (auto& fighter : player.fighters()) {
+        if (fighter.isHero()) continue;
+        if (free.empty()) {
+            throw InvalidSetup("Not enough free spaces for sidekick placement.");
+        }
+        int destination = free.front();
+        free.erase(free.begin());
+        fighter.placeAt(destination);
+    }
+}
+
+void GameController::shuffleDeck(Player& player) {
+    std::shuffle(player.deck().begin(), player.deck().end(), random_);
+}
+
+void GameController::checkDefeatedFighters() {
+    for (auto& player : players_) {
+        for (auto& fighter : player.fighters()) {
+            if (fighter.defeated()) {
+                fighter.removeFromBoard();
+            }
+        }
+    }
+}
+
+void GameController::checkWinner() {
+    if (gameOver_) return;
+    for (const auto& player : players_) {
+        if (player.heroFighter().defeated()) {
+            const Player& winner = opponentOf(player);
+            gameOver_ = true;
+            winnerName_ = winner.name() + " (" + heroKindName(winner.hero()) + ")";
+            return;
+        }
+    }
+}
+
+const Fighter* GameController::findFighterById(const std::string& fighterId) const {
+    for (const auto& player : players_) {
+        for (const auto& fighter : player.fighters()) {
+            if (fighter.id() == fighterId) return &fighter;
+        }
+    }
+    return nullptr;
+}
+
+Fighter* GameController::findFighterById(const std::string& fighterId) {
+    for (auto& player : players_) {
+        for (auto& fighter : player.fighters()) {
+            if (fighter.id() == fighterId) return &fighter;
+        }
+    }
+    return nullptr;
+}
+
+const Player* GameController::ownerOfFighter(const std::string& fighterId) const {
+    for (const auto& player : players_) {
+        for (const auto& fighter : player.fighters()) {
+            if (fighter.id() == fighterId) return &player;
+        }
+    }
+    return nullptr;
+}
+
+Player& GameController::ownerOfFighterMutable(const std::string& fighterId) {
+    for (auto& player : players_) {
+        for (auto& fighter : player.fighters()) {
+            if (fighter.id() == fighterId) return player;
+        }
+    }
+    throw RuleViolation("Unknown fighter owner.");
+}
+
+Player& GameController::opponentOf(const Player& player) {
+    return playerByIndex(player.id() == 0 ? 1 : 0);
+}
+
+const Player& GameController::opponentOf(const Player& player) const {
+    return playerByIndex(player.id() == 0 ? 1 : 0);
+}
+
+bool GameController::isCardPlayableBy(const Card& card, const Fighter& fighter, const Player& player) const {
+    if (fighter.defeated()) return false;
+    if (card.owner() == Character::Any) return true;
+    return fighter.cardOwner() == card.owner() && player.hasLivingCharacter(card.owner());
+}
+
+bool GameController::canAttackTarget(const Fighter& attacker, const Fighter& defender) const {
+    if (attacker.defeated() || defender.defeated()) return false;
+    if (board_.areAdjacentForCombat(attacker.spaceId(), defender.spaceId())) return true;
+    return attacker.range() == AttackRange::Ranged && board_.shareZone(attacker.spaceId(), defender.spaceId());
+}
+
+void GameController::drawCardForCurrentPlayer() {
+    drawCard(currentPlayer());
+}
+
+void GameController::decrementActions() { --actionsRemaining_; }
+
+void GameController::advanceTurn() {
+    currentPlayerIndex_ = opponentPlayerIndex();
+    actionsRemaining_ = 2;
+    pendingMovementPoints_ = 0;
+    movedThisManeuver_.clear();
+    pendingOptionalMovements_.clear();
+    draculaAbilityUsed_ = false;
+    ++turnNumber_;
+}
+
+int GameController::countLivingSistersInZoneWith(int spaceId) const {
+    int count = 0;
+    for (const auto& player : players_) {
+        if (player.hero() != HeroKind::Dracula) continue;
+        for (const auto& fighter : player.fighters()) {
+            if (!fighter.defeated() && fighter.cardOwner() == Character::Sister &&
+                board_.shareZone(fighter.spaceId(), spaceId)) {
+                ++count;
+            }
+        }
+    }
+    return count;
+}
+
+void GameController::moveFighterIgnoringDistance(Fighter& fighter, int destinationSpace) {
+    if (!board_.contains(destinationSpace)) {
+        throw RuleViolation("Destination does not exist.");
+    }
+    if (isSpaceOccupied(destinationSpace)) {
+        throw RuleViolation("Destination is occupied.");
+    }
+    fighter.placeAt(destinationSpace);
+}
+
+std::vector<int> GameController::freeSpacesSharingHeroZone(const Player& player) const {
+    std::vector<int> result;
+    int heroSpace = player.heroFighter().spaceId();
+    for (int candidate : board_.spacesSharingAnyZone(heroSpace)) {
+        if (!isSpaceOccupied(candidate)) {
+            result.push_back(candidate);
+        }
+    }
+    return result;
+}
+
+std::vector<int> GameController::valuesOnCard(const Card& card) const {
+    std::vector<int> values;
+    if (card.attack() >= 0) values.push_back(card.attack());
+    if (card.defense() >= 0) values.push_back(card.defense());
+    std::sort(values.begin(), values.end());
+    values.erase(std::unique(values.begin(), values.end()), values.end());
+    return values;
+}
+
+bool GameController::cardEffectsProtectedBySherlock(const Card& card, const Player& owner) const {
+    if (owner.hero() != HeroKind::Sherlock) return false;
+    return card.owner() == Character::Sherlock || card.owner() == Character::Watson;
+}
+
+bool GameController::isFighterFinished(const std::string& fighterId) const {
+    return std::find(finishedFighters_.begin(), finishedFighters_.end(), fighterId) != finishedFighters_.end();
+}
+
+void GameController::queueOptionalMovement(int playerIndex, const std::string& fighterId,
+                                           int maxSteps, const std::string& source) {
+    if (maxSteps <= 0) return;
+    const Player& player = playerByIndex(playerIndex);
+    const Fighter& fighter = player.fighterById(fighterId);
+    if (fighter.defeated()) return;
+    PendingMovementChoice choice{playerIndex, fighterId, maxSteps, source};
+    pendingOptionalMovements_.push_back(std::move(choice));
+}
 } // namespace unmatched
