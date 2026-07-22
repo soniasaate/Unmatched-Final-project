@@ -784,5 +784,120 @@ void GameController::resolveCombatEffectAfterDamage(const Card& card,
             break;
     }
 }
+
+
+std::vector<int> GameController::legalSchemeCards() const {
+    std::vector<int> result;
+    const auto& hand = currentPlayer().hand();
+    for (int i = 0; i < static_cast<int>(hand.size()); ++i) {
+        const Card& card = hand[i];
+        if (!card.isScheme()) continue;
+        if (card.owner() == Character::Any || currentPlayer().hasLivingCharacter(card.owner())) {
+            result.push_back(i);
+        }
+    }
+    return result;
+}
+
+SchemeChoiceKind GameController::requiredChoiceForScheme(int handIndex) const {
+    const Card& card = currentPlayer().hand()[handIndex];
+    switch (card.effect()) {
+        case EffectId::DraculaMistForm:
+        case EffectId::WatsonAid:
+            return SchemeChoiceKind::Destination;
+        case EffectId::SherlockConfirmSuspicion:
+            return SchemeChoiceKind::NamedValue;
+        case EffectId::SherlockEliminateImpossible:
+            return SchemeChoiceKind::OpponentHandCard;
+        case EffectId::SherlockMasterOfDisguise:
+            return SchemeChoiceKind::TargetFighter;
+        case EffectId::SisterRaveningSeduction:
+            return SchemeChoiceKind::TargetAndDestination;
+        default:
+            return SchemeChoiceKind::None;
+    }
+}
+
+std::vector<int> GameController::destinationChoicesForScheme(int handIndex, const SchemeChoice& partialChoice) const {
+    const Card& card = currentPlayer().hand()[handIndex];
+    std::vector<int> result;
+
+    if (card.effect() == EffectId::DraculaMistForm) {
+        for (const auto& candidate : board_.spaces()) {
+            if (!isSpaceOccupied(candidate.id())) {
+                result.push_back(candidate.id());
+            }
+        }
+        return result;
+    }
+
+    if (card.effect() == EffectId::WatsonAid) {
+        const Fighter& holmes = currentPlayer().heroFighter();
+        return board_.freeAdjacentSpaces(holmes.spaceId(), [&](int spaceId) {
+            return isSpaceOccupied(spaceId);
+        });
+    }
+
+    if (card.effect() == EffectId::SisterRaveningSeduction && !partialChoice.targetFighterId.empty()) {
+        const Fighter* target = findFighterById(partialChoice.targetFighterId);
+        const Player* owner = ownerOfFighter(partialChoice.targetFighterId);
+        if (target == nullptr || owner == nullptr) return result;
+
+        int ownerIndex = owner->id();
+        auto occupiedByEnemy = [&](int spaceId) {
+            for (const auto& player : players_) {
+                if (player.id() == ownerIndex) continue;
+                for (const auto& fighter : player.fighters()) {
+                    if (!fighter.defeated() && fighter.spaceId() == spaceId) return true;
+                }
+            }
+            return false;
+        };
+        auto occupiedByAny = [&](int spaceId) {
+            for (const auto& player : players_) {
+                for (const auto& fighter : player.fighters()) {
+                    if (!fighter.defeated() && fighter.id() != target->id() && fighter.spaceId() == spaceId) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+        return board_.reachableSpaces(target->spaceId(), 2, occupiedByEnemy, occupiedByAny);
+    }
+    return result;
+}
+
+std::vector<std::string> GameController::targetChoicesForScheme(int handIndex) const {
+    const Card& card = currentPlayer().hand()[handIndex];
+    std::vector<std::string> result;
+
+    if (card.effect() == EffectId::SherlockMasterOfDisguise) {
+        for (const auto* fighter : opponentPlayer().aliveFighters()) {
+            result.push_back(fighter->id());
+        }
+    } else if (card.effect() == EffectId::SisterRaveningSeduction) {
+        for (const auto& player : players_) {
+            for (const auto* fighter : player.aliveFighters()) {
+                result.push_back(fighter->id());
+            }
+        }
+    }
+    return result;
+}
+
+std::vector<int> GameController::namedValueChoicesForScheme(int handIndex) const {
+    const Card& card = currentPlayer().hand()[handIndex];
+    if (card.effect() != EffectId::SherlockConfirmSuspicion) return {};
+    return {0, 1, 2, 3, 4, 5, 6};
+}
+
+std::vector<int> GameController::opponentHandChoicesForScheme(int handIndex) const {
+    const Card& card = currentPlayer().hand()[handIndex];
+    if (card.effect() != EffectId::SherlockEliminateImpossible) return {};
+    std::vector<int> result(opponentPlayer().hand().size());
+    std::iota(result.begin(), result.end(), 0);
+    return result;
+}
 } // namespace unmatched
 
