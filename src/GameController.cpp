@@ -899,5 +899,195 @@ std::vector<int> GameController::opponentHandChoicesForScheme(int handIndex) con
     std::iota(result.begin(), result.end(), 0);
     return result;
 }
+
+
+void GameController::playScheme(int handIndex, const SchemeChoice& choice) {
+    if (actionsRemaining_ <= 0) {
+        throw RuleViolation("No actions remain this turn.");
+    }
+    if (!pendingOptionalMovements_.empty()) {
+        throw RuleViolation("Resolve the pending card movement before starting another action.");
+    }
+
+    auto legal = legalSchemeCards();
+    if (std::find(legal.begin(), legal.end(), handIndex) == legal.end()) {
+        throw RuleViolation("Selected scheme card is not legal.");
+    }
+
+    const Card& cardPreview = currentPlayer().hand()[handIndex];
+    SchemeChoiceKind requiredChoice = requiredChoiceForScheme(handIndex);
+    std::vector<int> preparedDestinations;
+    if (requiredChoice == SchemeChoiceKind::Destination || requiredChoice == SchemeChoiceKind::TargetAndDestination) {
+        preparedDestinations = destinationChoicesForScheme(handIndex, choice);
+    }
+
+    Player& player = currentPlayer();
+    Player& opponent = opponentPlayer();
+
+    auto destinationWasPrepared = [&](int destination) {
+        return std::find(preparedDestinations.begin(), preparedDestinations.end(), destination) != preparedDestinations.end();
+    };
+
+    switch (cardPreview.effect()) {
+        case EffectId::DraculaMistForm:
+            if (!destinationWasPrepared(choice.destinationSpace)) {
+                throw RuleViolation("Mist Form needs an empty destination.");
+            }
+            break;
+        case EffectId::WatsonAid:
+            if (!destinationWasPrepared(choice.destinationSpace)) {
+                throw RuleViolation("Watson needs a free space adjacent to Holmes.");
+            }
+            if (player.fighterById("watson").defeated()) {
+                throw RuleViolation("Watson is defeated and cannot be placed by Aid.");
+            }
+            break;
+        case EffectId::SherlockConfirmSuspicion:
+            if (choice.namedValue < 0) {
+                throw RuleViolation("Confirm Suspicion needs a named value.");
+            }
+            break;
+        case EffectId::SherlockEliminateImpossible:
+            if (choice.opponentHandIndex < 0 || choice.opponentHandIndex >= static_cast<int>(opponent.hand().size())) {
+                throw RuleViolation("Choose a valid opponent card.");
+            }
+            break;
+        case EffectId::SherlockMasterOfDisguise: {
+            auto targets = targetChoicesForScheme(handIndex);
+            if (std::find(targets.begin(), targets.end(), choice.targetFighterId) == targets.end()) {
+                throw RuleViolation("Choose a valid opposing fighter.");
+            }
+            break;
+        }
+        case EffectId::SisterRaveningSeduction: {
+            auto targets = targetChoicesForScheme(handIndex);
+            if (std::find(targets.begin(), targets.end(), choice.targetFighterId) == targets.end()) {
+                throw RuleViolation("Choose a valid fighter for Ravening Seduction.");
+            }
+            if (!destinationWasPrepared(choice.destinationSpace)) {
+                throw RuleViolation("Destination is not reachable for Ravening Seduction.");
+            }
+            break;
+        }
+        default:
+            break;
+    }
+
+    Card card = player.removeCardFromHand(handIndex);
+    int extraActions = 0;
+
+    
+    switch (card.effect()) {
+        case EffectId::DraculaMistForm: {
+            Fighter& dracula = player.heroFighter();
+            moveFighterIgnoringDistance(dracula, choice.destinationSpace);
+            extraActions = 1;
+            break;
+        }
+        case EffectId::DraculaBloodBath: {
+            Fighter& dracula = player.heroFighter();
+            dracula.heal(2);
+            for (auto& sister : player.fighters()) {
+                if (sister.cardOwner() == Character::Sister && sister.defeated()) {
+                    auto spaces = freeSpacesSharingHeroZone(player);
+                    if (!spaces.empty()) {
+                        sister.reviveAt(spaces.front());
+                        break;
+                    }
+                }
+            }
+            break;
+        }
+        case EffectId::DraculaHunt: {
+            Fighter& dracula = player.heroFighter();
+            int healed = 0;
+            for (auto& target : opponent.fighters()) {
+                if (!target.defeated() && board_.areAdjacentForCombat(dracula.spaceId(), target.spaceId())) {
+                    target.damage(1);
+                    ++healed;
+                }
+            }
+            dracula.heal(healed);
+            break;
+        }
+        case EffectId::WatsonAid: {
+            Fighter& holmes = player.heroFighter();
+            Fighter& watson = player.fighterById("watson");
+            watson.placeAt(choice.destinationSpace);
+            holmes.heal(1);
+            drawCard(player);
+            break;
+        }
+        case EffectId::SherlockConfirmSuspicion: {
+            break;
+        }
+        case EffectId::SherlockEliminateImpossible: {
+            Card burned = opponent.removeCardFromHand(choice.opponentHandIndex);
+            opponent.addToDiscard(std::move(burned));
+            break;
+        }
+        case EffectId::SherlockMasterOfDisguise: {
+            Fighter& holmes = player.heroFighter();
+            Fighter& target = opponent.fighterById(choice.targetFighterId);
+            int holmesSpace = holmes.spaceId();
+            int targetSpace = target.spaceId();
+            holmes.placeAt(targetSpace);
+            target.placeAt(holmesSpace);
+            target.damage(1);
+            break;
+        }
+        case EffectId::SisterRaveningSeduction: {
+            Fighter* target = findFighterById(choice.targetFighterId);
+            if (!target) throw RuleViolation("Choose a valid fighter for Ravening Seduction.");
+            target->placeAt(choice.destinationSpace);
+            int damage = 0;
+            for (const auto& sister : player.fighters()) {
+                if (!sister.defeated() && sister.cardOwner() == Character::Sister &&
+                    board_.areAdjacentForCombat(sister.spaceId(), target->spaceId())) {
+                    ++damage;
+                }
+            }
+            target->damage(damage);
+            break;
+        }
+        default:
+            break;
+    }
+
+    player.addToDiscard(std::move(card));
+    checkDefeatedFighters();
+    checkWinner();
+    --actionsRemaining_;
+    if (extraActions > 0) {
+        actionsRemaining_ += extraActions;
+    }
+    endTurnIfNeeded();
+}
+
+std::vector<int> GameController::getMatchingCardIndicesForConfirmSuspicion(int namedValue) const {
+    std::vector<int> result;
+    const auto& hand = opponentPlayer().hand();
+    for (int i = 0; i < static_cast<int>(hand.size()); ++i) {
+        const Card& card = hand[i];
+        auto values = valuesOnCard(card);
+        if (std::find(values.begin(), values.end(), namedValue) != values.end()) {
+            result.push_back(i);
+        }
+    }
+    return result;
+}
+
+void GameController::applyConfirmSuspicion(int chosenIndex) {
+    Player& opponent = opponentPlayer();
+    if (chosenIndex < 0 || chosenIndex >= static_cast<int>(opponent.hand().size())) {
+        throw RuleViolation("Invalid chosen card index.");
+    }
+    Card burned = opponent.removeCardFromHand(chosenIndex);
+    int damage = std::max(0, burned.boost());
+    opponent.heroFighter().damage(damage);
+    opponent.addToDiscard(std::move(burned));
+    checkDefeatedFighters();
+    checkWinner();
+}
 } // namespace unmatched
 
