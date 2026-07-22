@@ -12,4 +12,11 @@ public:
     Board createBaskervilleManor() const;
 };
 
+class DeckFactory {
+public:
+    std::vector<Card> createDeck(HeroKind hero) const;
+};
+
+
+
 } // namespace unmatched
