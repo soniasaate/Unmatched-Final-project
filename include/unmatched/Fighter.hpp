@@ -2,12 +2,14 @@
 
 #include "unmatched/FighterDefinition.hpp"
 #include "unmatched/GameExceptions.hpp"
+#include "unmatched/GameEntity.hpp" 
 
 namespace unmatched {
 
-class Fighter {
+class Fighter : public GameEntity {
 public:
     explicit Fighter(FighterDefinition definition);
+    virtual ~Fighter() = default;
 
     const FighterDefinition& definition() const;
     const std::string& id() const;
@@ -27,10 +29,17 @@ public:
     void reviveAt(int spaceId);
     void removeFromBoard();
 
+    virtual std::string getSpecialAbility() const;
+
+    void setHealth(int health);
+    void setSpaceId(int spaceId);
+    void setDefeated(bool defeated);
+
 private:
     FighterDefinition definition_;
     int health_;
     int spaceId_;
+    bool defeated_;
 };
 
 } // namespace unmatched
