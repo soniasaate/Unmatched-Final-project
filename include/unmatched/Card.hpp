@@ -1,7 +1,8 @@
 #pragma once
 
+#include "unmatched/GameEntity.hpp"
 #include <string>
-#include <vector>
+#include <functional>
 
 namespace unmatched {
 
@@ -32,77 +33,46 @@ enum class Timing {
     AfterCombat,
 };
 
-enum class EffectId {
-    None,
-    DraculaBloodStrike,
-    DraculaMistForm,
-    DraculaAmbush,
-    DraculaBloodBath,
-    DraculaBeastForm,
-    Dash,
-    Exploit,
-    DraculaLookIntoMyEyes,
-    DraculaHunt,
-    SisterRaveningSeduction,
-    SisterThirstForSustenance,
-    Feint,
-    WatsonAid,
-    SherlockConfirmSuspicion,
-    SherlockCounterpunch,
-    SherlockStrategicDeduction,
-    EducationNeverEnds,
-    SherlockElementary,
-    SherlockEliminateImpossible,
-    SherlockFixedPoint,
-    SherlockMasterOfDisguise,
-    SherlockGameAfoot,
-    WatsonPistol,
-    SherlockStudyMethods,
-};
+class GameController;
+class Fighter;
 
-class Card {
+class Card : public GameEntity {
 public:
-    Card(std::string title,
-         Character owner,
-         CardType type,
-         int attack,
-         int defense,
-         int boost,
-         Timing timing,
-         EffectId effect,
-         std::string effectText);
+    Card(std::string id, std::string name, Character owner,
+         CardType type, int attack, int defense, int boost, Timing timing,
+         std::function<void(Fighter&, Fighter&, GameController&)> effect = nullptr);
 
-    const std::string& title() const;
-    Character owner() const;
-    CardType type() const;
-    int attack() const;
-    int defense() const;
-    int boost() const;
-    Timing timing() const;
-    EffectId effect() const;
-    const std::string& effectText() const;
+    virtual ~Card() = default;
+
+    Character getOwner() const;
+    CardType getType() const;
+    int getAttack() const;
+    int getDefense() const;
+    int getBoost() const;
+    Timing getTiming() const;
+
+    void setOwner(Character owner);
+    void setType(CardType type);
+    void setAttack(int attack);
+    void setDefense(int defense);
+    void setBoost(int boost);
+    void setTiming(Timing timing);
 
     bool canAttack() const;
     bool canDefend() const;
     bool isScheme() const;
-    bool hasCombatEffect() const;
-    std::string typeLabel() const;
-    std::string ownerLabel() const;
-    std::string timingLabel() const;
+
+    void applyEffect(Fighter& attacker, Fighter& defender,
+                     GameController& controller) const;
 
 private:
-    std::string title_;
     Character owner_;
     CardType type_;
     int attack_;
     int defense_;
     int boost_;
     Timing timing_;
-    EffectId effect_;
-    std::string effectText_;
+    std::function<void(Fighter&, Fighter&, GameController&)> effect_;
 };
 
-std::string heroKindName(HeroKind hero);
-std::string characterName(Character character);
-
-}  // namespace unmatched
+} // namespace unmatched
