@@ -24,6 +24,7 @@ int Card::getAttack() const { return attack_; }
 int Card::getDefense() const { return defense_; }
 int Card::getBoost() const { return boost_; }
 Timing Card::getTiming() const { return timing_; }
+std::string Card::getTitle() const { return getName(); }
 
 void Card::setOwner(Character owner) { owner_ = owner; }
 void Card::setType(CardType type) { type_ = type; }

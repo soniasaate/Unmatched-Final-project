@@ -40,7 +40,7 @@ class Card : public GameEntity {
 public:
     Card(std::string id, std::string name, Character owner,
          CardType type, int attack, int defense, int boost, Timing timing,
-         std::function<void(Fighter&, Fighter&, GameController&)> effect = nullptr);
+         std::function<void(Fighter&, Fighter&, GameController&, int&, int&)> effect = nullptr);
 
     virtual ~Card() = default;
 
@@ -50,6 +50,7 @@ public:
     int getDefense() const;
     int getBoost() const;
     Timing getTiming() const;
+    std::string getTitle() const;
 
     void setOwner(Character owner);
     void setType(CardType type);
@@ -73,7 +74,7 @@ private:
     int defense_;
     int boost_;
     Timing timing_;
-    std::function<void(Fighter&, Fighter&, GameController&)> effect_;
+    std::function<void(Fighter&, Fighter&, GameController&, int&, int&)> effect_;
 };
 
 } // namespace unmatched

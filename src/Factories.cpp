@@ -65,8 +65,7 @@ std::vector<Card> DeckFactory::createDeck(HeroKind hero) const {
                          int defense,
                          int boost,
                          Timing timing,
-                         std::function<void(Fighter&, Fighter&, GameController&)> effect,
-                         const std::string& text) {
+                         std::function<void(Fighter&, Fighter&, GameController&, int&, int&)> effect) {
         for (int i = 0; i < copies; ++i) {
             deck.emplace_back(title, title, owner, type, attack, defense, boost, timing, effect);
         }
@@ -74,130 +73,143 @@ std::vector<Card> DeckFactory::createDeck(HeroKind hero) const {
 
     if (hero == HeroKind::Dracula) {
         addCopies(2, "Blood Hunger", Character::Dracula, CardType::Attack, 2, -1, 3, Timing::DuringCombat,
-                  [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                      // منطق 
-                  }, "+1 attack for each Sister in the defender's zone.");
-                  
+            [](Fighter& attacker, Fighter& defender, GameController& controller, int& attackValue, int&) {
+                auto* dracula = dynamic_cast<Dracula*>(&attacker);
+                if (!dracula) return;
+                int bonus = 0;
+                for (const auto& sister : dracula->getSisters()) {
+                    if (!sister.defeated() && controller.board().shareZone(sister.spaceId(), defender.spaceId())) {
+                        ++bonus;
+                    }
+                }
+                attackValue += bonus;
+            });
+
         addCopies(2, "Mist Form", Character::Dracula, CardType::Scheme, -1, -1, 2, Timing::None,
-                  [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                      // منطق 
-                  }, "Place Dracula in any empty space and gain 1 action.");
-                  
+            [](Fighter&, Fighter&, GameController&, int&, int&) {
+                // بعدا
+            });
+
         addCopies(2, "Ambush", Character::Any, CardType::Attack, 2, -1, 3, Timing::Immediately,
-                  [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                      // منطق 
-                  }, "Opponent discards a random card; add its boost to this attack.");
-                  
+            [](Fighter&, Fighter&, GameController&, int&, int&) {
+                // بعدا
+            });
+
         addCopies(2, "Blood Bath", Character::Dracula, CardType::Scheme, -1, -1, 2, Timing::None,
-                  [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                      // منطق 
-                  }, "Recover 2 health. Revive one defeated Sister in Dracula's zone.");
-                  
+            [](Fighter&, Fighter&, GameController&, int&, int&) {
+                // بعدا
+            });
+
         addCopies(2, "Beast Form", Character::Dracula, CardType::Attack, 6, -1, 4, Timing::DuringCombat,
-                  [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                      // منطق 
-                  }, "May discard cards for +1 attack each.");
-                  
+            [](Fighter&, Fighter&, GameController&, int&, int&) {
+                // بعدا
+            });
+
         addCopies(3, "Dash", Character::Any, CardType::Versatile, 3, 3, 1, Timing::AfterCombat,
-                  nullptr, "Move your fighter up to 3 spaces after combat.");
-                  
+            [](Fighter&, Fighter&, GameController&, int&, int&) {
+                // بعدا
+            });
+
         addCopies(3, "Exploit", Character::Any, CardType::Versatile, 4, 4, 1, Timing::AfterCombat,
-                  nullptr, "Draw 1 card after combat.");
-                  
+            [](Fighter&, Fighter&, GameController& controller, int&, int&) {
+                controller.drawCard(controller.currentPlayer());
+            });
+
         addCopies(3, "Look Into My Eyes", Character::Dracula, CardType::Defense, -1, 1, 2, Timing::DuringCombat,
-                  [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                      // منطق 
-                  }, "Add the attack card boost value to this defense.");
-                  
+            [](Fighter&, Fighter&, GameController&, int&, int&) {
+                // بعدا
+            });
+
         addCopies(2, "Hunt", Character::Dracula, CardType::Scheme, -1, -1, 4, Timing::None,
-                  [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                      // منطق 
-                  }, "Deal 1 damage to each adjacent opposing fighter and heal that much.");
-                  
+            [](Fighter&, Fighter&, GameController&, int&, int&) {
+                // بعدا
+            });
+
         addCopies(3, "Ravening Seduction", Character::Sister, CardType::Scheme, -1, -1, 2, Timing::None,
-                  [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                      // منطق 
-                  }, "Move any fighter up to 2 spaces, then damage for adjacent Sisters.");
-                  
+            [](Fighter&, Fighter&, GameController&, int&, int&) {
+                // بعدا
+            });
+
         addCopies(3, "Thirst for Sustenance", Character::Sister, CardType::Attack, 3, -1, 3, Timing::AfterCombat,
-                  [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                      // منطق 
-                  }, "If you won, place Dracula adjacent to the opposing fighter.");
-                  
+            [](Fighter&, Fighter&, GameController&, int&, int&) {
+                // بعدا
+            });
+
         addCopies(3, "Feint", Character::Any, CardType::Versatile, 2, 2, 2, Timing::Immediately,
-                  [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                      // منطق 
-                  }, "Cancel all effects on the opponent's card.");
-                  
+            [](Fighter&, Fighter&, GameController&, int&, int&) {
+                // بعدا
+            });
+
         return deck;
     }
 
     // Sherlock
     addCopies(2, "Aid", Character::Watson, CardType::Scheme, -1, -1, 2, Timing::None,
-              [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                  // منطق 
-              }, "Place Watson adjacent to Holmes, heal Holmes 1, and draw 1 card.");
-              
+        [](Fighter&, Fighter&, GameController&, int&, int&) {
+            // بعدا
+        });
+
     addCopies(3, "Confirm Suspicion", Character::Sherlock, CardType::Scheme, -1, -1, 1, Timing::None,
-              [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                  // منطق 
-              }, "Name a value; opponent discards a matching card or reveals hand.");
-              
+        [](Fighter&, Fighter&, GameController&, int&, int&) {
+            // بعدا
+        });
+
     addCopies(3, "Counterpunch", Character::Sherlock, CardType::Versatile, 3, 3, 1, Timing::AfterCombat,
-              [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                  // منطق 
-              }, "If Holmes is adjacent to the opposing fighter, deal 2 damage.");
-              
+        [](Fighter&, Fighter&, GameController&, int&, int&) {
+            // بعدا
+        });
+
     addCopies(3, "Strategic Deduction", Character::Sherlock, CardType::Versatile, 3, 3, 1, Timing::DuringCombat,
-              [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                  // منطق 
-              }, "Change the printed value on the opponent's card to its boost.");
-              
+        [](Fighter&, Fighter&, GameController&, int&, int&) {
+            // بعدا
+        });
+
     addCopies(2, "Education Never Ends", Character::Any, CardType::Versatile, 3, 3, 1, Timing::AfterCombat,
-              [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                  // منطق 
-              }, "If you won, opponent draws 1. If you lost, draw 2.");
-              
+        [](Fighter&, Fighter&, GameController&, int&, int&) {
+            // بعدا
+        });
+
     addCopies(2, "Elementary", Character::Sherlock, CardType::Defense, -1, 3, 3, Timing::DuringCombat,
-              [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                  // منطق 
-              }, "Predict and cancel the attack value.");
-              
+        [](Fighter&, Fighter&, GameController&, int&, int&) {
+            // بعدا
+        });
+
     addCopies(2, "Eliminate Impossible", Character::Sherlock, CardType::Scheme, -1, -1, 2, Timing::None,
-              [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                  // منطق 
-              }, "Look at opponent hand and burn 1 card.");
-              
+        [](Fighter&, Fighter&, GameController&, int&, int&) {
+            // بعدا
+        });
+
     addCopies(3, "Feint", Character::Any, CardType::Versatile, 2, 2, 1, Timing::Immediately,
-              [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                  // منطق 
-              }, "Cancel all effects on the opponent's card.");
-              
+        [](Fighter&, Fighter&, GameController&, int&, int&) {
+            // بعدا
+        });
+
     addCopies(2, "Fixed Point", Character::Watson, CardType::Versatile, 3, 3, 1, Timing::AfterCombat,
-              [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                  // منطق 
-              }, "If Watson is adjacent to Holmes, heal both by 1.");
-              
+        [](Fighter&, Fighter&, GameController&, int&, int&) {
+            // بعدا
+        });
+
     addCopies(2, "Master of Disguise", Character::Sherlock, CardType::Scheme, -1, -1, 2, Timing::None,
-              [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                  // منطق 
-              }, "Swap Holmes with an opposing fighter and deal it 1 damage.");
-              
+        [](Fighter&, Fighter&, GameController&, int&, int&) {
+            // بعدا
+        });
+
     addCopies(2, "The Game Is Afoot", Character::Sherlock, CardType::Attack, 5, -1, 2, Timing::AfterCombat,
-              [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                  // منطق 
-              }, "Move Holmes up to 3 spaces after combat.");
-              
+        [](Fighter&, Fighter&, GameController&, int&, int&) {
+            // بعدا
+        });
+
     addCopies(2, "Service Revolver", Character::Watson, CardType::Attack, 5, -1, 3, Timing::None,
-              nullptr, "No effect.");
-              
+        nullptr);
+
     addCopies(2, "Study Methods", Character::Any, CardType::Versatile, 3, 3, 2, Timing::AfterCombat,
-              [](Fighter& attacker, Fighter& defender, GameController& controller) {
-                  // منطق
-              }, "If you won, inspect the opponent's hand.");
-              
+        [](Fighter&, Fighter&, GameController&, int&, int&) {
+            // بعدا
+        });
+
     return deck;
 }
+
 
 std::vector<std::unique_ptr<Fighter>> FighterFactory::createFighters(HeroKind hero) const {
     std::vector<std::unique_ptr<Fighter>> fighters;

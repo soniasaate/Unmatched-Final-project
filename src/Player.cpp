@@ -1,5 +1,4 @@
 #include "unmatched/Player.hpp"
-
 #include <algorithm>
 #include <utility>
 
@@ -24,11 +23,11 @@ HeroKind Player::hero() const {
     return hero_;
 }
 
-std::vector<Fighter>& Player::fighters() {
+std::vector<std::unique_ptr<Fighter>>& Player::fighters() {
     return fighters_;
 }
 
-const std::vector<Fighter>& Player::fighters() const {
+const std::vector<std::unique_ptr<Fighter>>& Player::fighters() const {
     return fighters_;
 }
 
@@ -57,50 +56,46 @@ const std::vector<Card>& Player::discardPile() const {
 }
 
 Fighter& Player::fighterById(const std::string& fighterId) {
-    auto it = std::find_if(fighters_.begin(), fighters_.end(), [&](const Fighter& fighter) {
-        return fighter.id() == fighterId;
-    });
+    auto it = std::find_if(fighters_.begin(), fighters_.end(),
+        [&](const std::unique_ptr<Fighter>& f) { return f->id() == fighterId; });
     if (it == fighters_.end()) {
         throw RuleViolation("Unknown fighter: " + fighterId);
     }
-    return *it;
+    return **it;
 }
 
 const Fighter& Player::fighterById(const std::string& fighterId) const {
-    auto it = std::find_if(fighters_.begin(), fighters_.end(), [&](const Fighter& fighter) {
-        return fighter.id() == fighterId;
-    });
+    auto it = std::find_if(fighters_.begin(), fighters_.end(),
+        [&](const std::unique_ptr<Fighter>& f) { return f->id() == fighterId; });
     if (it == fighters_.end()) {
         throw RuleViolation("Unknown fighter: " + fighterId);
     }
-    return *it;
+    return **it;
 }
 
 Fighter& Player::heroFighter() {
-    auto it = std::find_if(fighters_.begin(), fighters_.end(), [](const Fighter& fighter) {
-        return fighter.isHero();
-    });
+    auto it = std::find_if(fighters_.begin(), fighters_.end(),
+        [](const std::unique_ptr<Fighter>& f) { return f->isHero(); });
     if (it == fighters_.end()) {
         throw RuleViolation("Player has no hero.");
     }
-    return *it;
+    return **it;
 }
 
 const Fighter& Player::heroFighter() const {
-    auto it = std::find_if(fighters_.begin(), fighters_.end(), [](const Fighter& fighter) {
-        return fighter.isHero();
-    });
+    auto it = std::find_if(fighters_.begin(), fighters_.end(),
+        [](const std::unique_ptr<Fighter>& f) { return f->isHero(); });
     if (it == fighters_.end()) {
         throw RuleViolation("Player has no hero.");
     }
-    return *it;
+    return **it;
 }
 
 std::vector<Fighter*> Player::aliveFighters() {
     std::vector<Fighter*> result;
-    for (auto& fighter : fighters_) {
-        if (!fighter.defeated()) {
-            result.push_back(&fighter);
+    for (auto& f : fighters_) {
+        if (!f->defeated()) {
+            result.push_back(f.get());
         }
     }
     return result;
@@ -108,9 +103,9 @@ std::vector<Fighter*> Player::aliveFighters() {
 
 std::vector<const Fighter*> Player::aliveFighters() const {
     std::vector<const Fighter*> result;
-    for (const auto& fighter : fighters_) {
-        if (!fighter.defeated()) {
-            result.push_back(&fighter);
+    for (const auto& f : fighters_) {
+        if (!f->defeated()) {
+            result.push_back(f.get());
         }
     }
     return result;
@@ -137,9 +132,12 @@ bool Player::hasLivingCharacter(Character character) const {
     if (character == Character::Any) {
         return !aliveFighters().empty();
     }
-    return std::any_of(fighters_.begin(), fighters_.end(), [&](const Fighter& fighter) {
-        return !fighter.defeated() && fighter.cardOwner() == character;
-    });
+    for (const auto& f : fighters_) {
+        if (!f->defeated() && f->cardOwner() == character) {
+            return true;
+        }
+    }
+    return false;
 }
 
-}  // namespace unmatched
+} // namespace unmatched

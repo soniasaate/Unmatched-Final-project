@@ -122,7 +122,7 @@ std::string Fighter::getSpecialAbility() const {
 }
 
 bool Fighter::canPlayCard(const Card& card) const {
-    return card.owner() == Character::Any || card.owner() == cardOwner();
+    return card.getOwner() == Character::Any || card.getOwner() == cardOwner();
 }
 
 void Fighter::onCombatEffect(const Card&, bool, Fighter&) {
