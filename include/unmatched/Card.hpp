@@ -63,7 +63,8 @@ public:
     bool isScheme() const;
 
     void applyEffect(Fighter& attacker, Fighter& defender,
-                     GameController& controller) const;
+                 GameController& controller,
+                 int& attackValue, int& defenseValue) const;
 
 private:
     Character owner_;

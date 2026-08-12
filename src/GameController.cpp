@@ -1,6 +1,7 @@
 #include "unmatched/GameController.hpp"
-
 #include "unmatched/GameExceptions.hpp"
+#include "unmatched/Dracula.hpp"
+#include "unmatched/Sherlock.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -147,8 +148,6 @@ bool GameController::draculaAbilityAvailable() const {
     return false;
 }
 
-
-
 bool GameController::isSpaceOccupiedByEnemy(int spaceId) const {
     for (const auto& fighter : opponentPlayer().fighters()) {
         if (!fighter.defeated() && fighter.spaceId() == spaceId) return true;
@@ -172,7 +171,6 @@ void GameController::drawCardForCurrentPlayer() {
     drawCard(currentPlayer());
 }
 
-
 void GameController::beginManeuver(int boostHandIndex) {
     if (actionsRemaining_ <= 0) throw RuleViolation("No actions remain.");
     if (!pendingOptionalMovements_.empty()) throw RuleViolation("Resolve pending movement.");
@@ -184,7 +182,7 @@ void GameController::beginManeuver(int boostHandIndex) {
     int boost = 0;
     if (boostHandIndex != -1) {
         Card boosted = player.removeCardFromHand(boostHandIndex);
-        boost = boosted.boost();
+        boost = boosted.getBoost();
         player.addToDiscard(std::move(boosted));
     }
 
@@ -223,7 +221,6 @@ std::vector<std::string> GameController::movableCurrentFighterIds() const {
     return result;
 }
 
-
 std::vector<int> GameController::reachableDestinationsFor(const std::string& fighterId) const {
     const Fighter* fighter = findFighterById(fighterId);
     if (!fighter || fighter->defeated()) return {};
@@ -250,7 +247,6 @@ bool GameController::isFighterFinished(const std::string& fighterId) const
            != finishedFighters_.end();
 }
 
-
 void GameController::moveCurrentFighter(const std::string& fighterId, int destinationSpace) {
     Fighter& fighter = currentPlayer().fighterById(fighterId);
     if (isFighterFinished(fighterId)) {
@@ -268,8 +264,6 @@ void GameController::moveCurrentFighter(const std::string& fighterId, int destin
     it->second -= cost;
 }
 
-
-
 void GameController::finishManeuver() {
     remainingMovementPoints_.clear();
     movedThisManeuver_.clear();
@@ -277,6 +271,7 @@ void GameController::finishManeuver() {
     --actionsRemaining_;
     endTurnIfNeeded();
 }
+
 std::vector<std::string> GameController::legalAttackers() const {
     std::vector<std::string> result;
     for (const auto* fighter : currentPlayer().aliveFighters()) {
@@ -304,7 +299,7 @@ std::vector<int> GameController::legalAttackCardsFor(const std::string& attacker
     const auto& hand = currentPlayer().hand();
     for (int i = 0; i < static_cast<int>(hand.size()); ++i) {
         const Card& card = hand.at(static_cast<std::size_t>(i));
-        if (card.canAttack() && isCardPlayableBy(card, attacker, currentPlayer())) {
+        if (card.canAttack() && isCardPlayableBy(card, attacker)) {
             result.push_back(i);
         }
     }
@@ -317,7 +312,7 @@ std::vector<int> GameController::legalDefenseCardsFor(const std::string& defende
     const auto& hand = opponentPlayer().hand();
     for (int i = 0; i < static_cast<int>(hand.size()); ++i) {
         const Card& card = hand.at(static_cast<std::size_t>(i));
-        if (card.canDefend() && isCardPlayableBy(card, defender, opponentPlayer())) {
+        if (card.canDefend() && isCardPlayableBy(card, defender)) {
             result.push_back(i);
         }
     }
@@ -329,17 +324,21 @@ void GameController::resolveAttack(const std::string& attackerId,
                                    int attackCardIndex,
                                    int defenseCardIndex,
                                    const std::vector<int>& beastFormBoostCardIndexes,
-                                    int predictedElementaryValue) {
+                                   int predictedElementaryValue) {
+    (void)predictedElementaryValue;
+
     if (actionsRemaining_ <= 0) {
         throw RuleViolation("No actions remain this turn.");
     }
     if (!pendingOptionalMovements_.empty()) {
         throw RuleViolation("Resolve the pending card movement before starting another action.");
     }
+
     Player& attackerPlayer = currentPlayer();
     Player& defenderPlayer = opponentPlayer();
     Fighter& attacker = attackerPlayer.fighterById(attackerId);
     Fighter& defender = defenderPlayer.fighterById(defenderId);
+
     if (!canAttackTarget(attacker, defender)) {
         throw RuleViolation("Target is not in range.");
     }
@@ -348,16 +347,19 @@ void GameController::resolveAttack(const std::string& attackerId,
     if (std::find(legalAttackCards.begin(), legalAttackCards.end(), attackCardIndex) == legalAttackCards.end()) {
         throw RuleViolation("Selected attack card is not legal for this fighter.");
     }
+
     if (defenseCardIndex != -1) {
         auto legalDefenseCards = legalDefenseCardsFor(defenderId);
         if (std::find(legalDefenseCards.begin(), legalDefenseCards.end(), defenseCardIndex) == legalDefenseCards.end()) {
             throw RuleViolation("Selected defense card is not legal for this fighter.");
         }
     }
+
     const Card& attackCardPreview = attackerPlayer.hand().at(static_cast<std::size_t>(attackCardIndex));
-    if (!beastFormBoostCardIndexes.empty() && attackCardPreview.effect() != EffectId::DraculaBeastForm) {
+    if (!beastFormBoostCardIndexes.empty() && attackCardPreview.getTitle() != "Beast Form") {
         throw RuleViolation("Only Beast Form can discard cards for extra attack.");
     }
+
     std::set<int> uniqueBeastBoosts;
     for (int index : beastFormBoostCardIndexes) {
         if (index < 0 || index >= static_cast<int>(attackerPlayer.hand().size())) {
@@ -381,86 +383,35 @@ void GameController::resolveAttack(const std::string& attackerId,
         ++beastFormBonus;
         attackerPlayer.addToDiscard(std::move(burned));
     }
+
     std::optional<Card> defenseCard;
     if (defenseCardIndex != -1) {
         defenseCard = defenderPlayer.removeCardFromHand(defenseCardIndex);
     }
 
+    int attackValue = std::max(0, attackCard.getAttack()) + beastFormBonus;
+    int defenseValue = defenseCard.has_value() ? std::max(0, defenseCard->getDefense()) : 0;
 
-    int attackValue = std::max(0, attackCard.attack());
-    int defenseValue = defenseCard.has_value() ? std::max(0, defenseCard->defense()) : 0;
-    bool attackEffectsCanceled = false;
-    bool defenseEffectsCanceled = false;
+    attackCard.applyEffect(attacker, defender, *this, attackValue, defenseValue);
 
-    if (attackCard.effect() == EffectId::Feint && defenseCard.has_value() &&
-        !cardEffectsProtectedBySherlock(*defenseCard, defenderPlayer)) {
-        defenseEffectsCanceled = true;
-    
-    }
-    if (defenseCard.has_value() && defenseCard->effect() == EffectId::Feint &&
-        !cardEffectsProtectedBySherlock(attackCard, attackerPlayer)) {
-        attackEffectsCanceled = true;
-        
-    }
-
-    if (!attackEffectsCanceled && attackCard.effect() == EffectId::DraculaAmbush && !defenderPlayer.hand().empty()) {
-        std::uniform_int_distribution<int> distribution(0, static_cast<int>(defenderPlayer.hand().size()) - 1);
-        int discardedIndex = distribution(random_);
-        Card discarded = defenderPlayer.removeCardFromHand(discardedIndex);
-        attackValue += discarded.boost();
-    
-        defenderPlayer.addToDiscard(std::move(discarded));
-    }
-
-    if (defenseCard.has_value() && !defenseEffectsCanceled) {
-        if (defenseCard->effect() == EffectId::DraculaLookIntoMyEyes) {
-            defenseValue += std::max(0, attackCard.boost());
-            
-        }
-        if (defenseCard->effect() == EffectId::SherlockStrategicDeduction) {
-            attackValue = std::max(0, attackCard.boost());
-         
-        }
-        if (defenseCard->effect() == EffectId::SherlockElementary) {
-            if (!cardEffectsProtectedBySherlock(attackCard, attackerPlayer)) {
-                if (predictedElementaryValue != -1 && attackCard.attack() == predictedElementaryValue) {
-                    attackValue = 0;
-                    attackEffectsCanceled = true;
-                }
-            }
-        }
-    }
-
-    if (!attackEffectsCanceled) {
-        if (attackCard.effect() == EffectId::DraculaBloodStrike) {
-            int bonus = countLivingSistersInZoneWith(defender.spaceId());
-            attackValue += bonus;
-          
-        }
-        if (attackCard.effect() == EffectId::SherlockStrategicDeduction && defenseCard.has_value()) {
-            defenseValue = std::max(0, defenseCard->boost());
-           
-        }
-        if (attackCard.effect() == EffectId::DraculaBeastForm) {
-            attackValue += beastFormBonus;
-          
-        }
+    if (defenseCard.has_value()) {
+        defenseCard->applyEffect(defender, attacker, *this, defenseValue, attackValue);
     }
 
     int directDamage = std::max(0, attackValue - defenseValue);
-    if (directDamage > 0) 
-    {
+    if (directDamage > 0) {
         defender.damage(directDamage);
     }
- 
+
     bool attackerWon = directDamage > 0;
 
-    if (defenseCard.has_value() && !defenseEffectsCanceled) {
-        resolveCombatEffectAfterDamage(*defenseCard, defenderPlayer, defender, attackerPlayer, attacker, !attackerWon, directDamage);
+    if (defenseCard.has_value()) {
+        resolveCombatEffectAfterDamage(*defenseCard, defenderPlayer, defender, 
+                                       attackerPlayer, attacker, !attackerWon, directDamage);
     }
-    if (!attackEffectsCanceled) {
-        resolveCombatEffectAfterDamage(attackCard, attackerPlayer, attacker, defenderPlayer, defender, attackerWon, directDamage);
-    }
+    
+    resolveCombatEffectAfterDamage(attackCard, attackerPlayer, attacker, 
+                                   defenderPlayer, defender, attackerWon, directDamage);
 
     if (defenseCard.has_value()) {
         defenderPlayer.addToDiscard(std::move(*defenseCard));
@@ -480,7 +431,7 @@ std::vector<int> GameController::legalSchemeCards() const {
         if (!card.isScheme()) {
             continue;
         }
-        if (card.owner() == Character::Any || currentPlayer().hasLivingCharacter(card.owner())) {
+        if (card.getOwner() == Character::Any || currentPlayer().hasLivingCharacter(card.getOwner())) {
             result.push_back(i);
         }
     }
@@ -489,27 +440,35 @@ std::vector<int> GameController::legalSchemeCards() const {
 
 SchemeChoiceKind GameController::requiredChoiceForScheme(int handIndex) const {
     const Card& card = currentPlayer().hand().at(static_cast<std::size_t>(handIndex));
-    switch (card.effect()) {
-        case EffectId::DraculaMistForm:
-        case EffectId::WatsonAid:
-            return SchemeChoiceKind::Destination;
-        case EffectId::SherlockConfirmSuspicion:
-            return SchemeChoiceKind::NamedValue;
-        case EffectId::SherlockEliminateImpossible:
-            return SchemeChoiceKind::OpponentHandCard;
-        case EffectId::SherlockMasterOfDisguise:
-            return SchemeChoiceKind::TargetFighter;
-        case EffectId::SisterRaveningSeduction:
-            return SchemeChoiceKind::TargetAndDestination;
-        default:
-            return SchemeChoiceKind::None;
+    const std::string& title = card.getTitle();
+
+    if (title == "Mist Form") {
+        return SchemeChoiceKind::Destination;
     }
+    if (title == "Aid") {
+        return SchemeChoiceKind::Destination;
+    }
+    if (title == "Confirm Suspicion") {
+        return SchemeChoiceKind::NamedValue;
+    }
+    if (title == "Eliminate Impossible") {
+        return SchemeChoiceKind::OpponentHandCard;
+    }
+    if (title == "Master of Disguise") {
+        return SchemeChoiceKind::TargetFighter;
+    }
+    if (title == "Ravening Seduction") {
+        return SchemeChoiceKind::TargetAndDestination;
+    }
+    return SchemeChoiceKind::None;
 }
 
 std::vector<int> GameController::destinationChoicesForScheme(int handIndex, const SchemeChoice& partialChoice) const {
     const Card& card = currentPlayer().hand().at(static_cast<std::size_t>(handIndex));
+    const std::string& title = card.getTitle();
     std::vector<int> result;
-    if (card.effect() == EffectId::DraculaMistForm) {
+    
+    if (title == "Mist Form") {
         for (const auto& candidate : board_.spaces()) {
             if (!isSpaceOccupied(candidate.id())) {
                 result.push_back(candidate.id());
@@ -517,13 +476,13 @@ std::vector<int> GameController::destinationChoicesForScheme(int handIndex, cons
         }
         return result;
     }
-    if (card.effect() == EffectId::WatsonAid) {
+    if (title == "Aid") {
         const Fighter& holmes = currentPlayer().heroFighter();
         return board_.freeAdjacentSpaces(holmes.spaceId(), [&](int spaceId) {
             return isSpaceOccupied(spaceId);
         });
     }
-    if (card.effect() == EffectId::SisterRaveningSeduction && !partialChoice.targetFighterId.empty()) {
+    if (title == "Ravening Seduction" && !partialChoice.targetFighterId.empty()) {
         const Fighter* target = findFighterById(partialChoice.targetFighterId);
         const Player* owner = ownerOfFighter(partialChoice.targetFighterId);
         if (target == nullptr || owner == nullptr) {
@@ -560,12 +519,14 @@ std::vector<int> GameController::destinationChoicesForScheme(int handIndex, cons
 
 std::vector<std::string> GameController::targetChoicesForScheme(int handIndex) const {
     const Card& card = currentPlayer().hand().at(static_cast<std::size_t>(handIndex));
+    const std::string& title = card.getTitle();
     std::vector<std::string> result;
-    if (card.effect() == EffectId::SherlockMasterOfDisguise) {
+    
+    if (title == "Master of Disguise") {
         for (const auto* fighter : opponentPlayer().aliveFighters()) {
             result.push_back(fighter->id());
         }
-    } else if (card.effect() == EffectId::SisterRaveningSeduction) {
+    } else if (title == "Ravening Seduction") {
         for (const auto& player : players_) {
             for (const auto* fighter : player.aliveFighters()) {
                 result.push_back(fighter->id());
@@ -577,7 +538,7 @@ std::vector<std::string> GameController::targetChoicesForScheme(int handIndex) c
 
 std::vector<int> GameController::namedValueChoicesForScheme(int handIndex) const {
     const Card& card = currentPlayer().hand().at(static_cast<std::size_t>(handIndex));
-    if (card.effect() != EffectId::SherlockConfirmSuspicion) {
+    if (card.getTitle() != "Confirm Suspicion") {
         return {};
     }
     return {0, 1, 2, 3, 4, 5, 6};
@@ -585,7 +546,7 @@ std::vector<int> GameController::namedValueChoicesForScheme(int handIndex) const
 
 std::vector<int> GameController::opponentHandChoicesForScheme(int handIndex) const {
     const Card& card = currentPlayer().hand().at(static_cast<std::size_t>(handIndex));
-    if (card.effect() != EffectId::SherlockEliminateImpossible) {
+    if (card.getTitle() != "Eliminate Impossible") {
         return {};
     }
     std::vector<int> result(opponentPlayer().hand().size());
@@ -600,187 +561,26 @@ void GameController::playScheme(int handIndex, const SchemeChoice& choice) {
     if (!pendingOptionalMovements_.empty()) {
         throw RuleViolation("Resolve the pending card movement before starting another action.");
     }
+
     auto legal = legalSchemeCards();
     if (std::find(legal.begin(), legal.end(), handIndex) == legal.end()) {
         throw RuleViolation("Selected scheme card is not legal.");
     }
 
-    const Card& cardPreview = currentPlayer().hand().at(static_cast<std::size_t>(handIndex));
-    SchemeChoiceKind requiredChoice = requiredChoiceForScheme(handIndex);
-    std::vector<int> preparedDestinations;
-    if (requiredChoice == SchemeChoiceKind::Destination || requiredChoice == SchemeChoiceKind::TargetAndDestination) {
-        preparedDestinations = destinationChoicesForScheme(handIndex, choice);
-    }
-
     Player& player = currentPlayer();
     Player& opponent = opponentPlayer();
 
-    auto destinationWasPrepared = [&](int destination) {
-        return std::find(preparedDestinations.begin(), preparedDestinations.end(), destination) != preparedDestinations.end();
-    };
-
-    switch (cardPreview.effect()) {
-        case EffectId::DraculaMistForm:
-            if (!destinationWasPrepared(choice.destinationSpace)) {
-                throw RuleViolation("Mist Form needs an empty destination.");
-            }
-            break;
-        case EffectId::WatsonAid:
-            if (!destinationWasPrepared(choice.destinationSpace)) {
-                throw RuleViolation("Watson needs a free space adjacent to Holmes.");
-            }
-            if (player.fighterById("watson").defeated()) {
-                throw RuleViolation("Watson is defeated and cannot be placed by Aid.");
-            }
-            break;
-        case EffectId::SherlockConfirmSuspicion:
-            if (choice.namedValue < 0) {
-                throw RuleViolation("Confirm Suspicion needs a named value.");
-            }
-            break;
-        case EffectId::SherlockEliminateImpossible:
-            if (choice.opponentHandIndex < 0 || choice.opponentHandIndex >= static_cast<int>(opponent.hand().size())) {
-                throw RuleViolation("Choose a valid opponent card.");
-            }
-            break;
-        case EffectId::SherlockMasterOfDisguise: {
-            auto targets = targetChoicesForScheme(handIndex);
-            if (std::find(targets.begin(), targets.end(), choice.targetFighterId) == targets.end()) {
-                throw RuleViolation("Choose a valid opposing fighter.");
-            }
-            break;
-        }
-        case EffectId::SisterRaveningSeduction: {
-            auto targets = targetChoicesForScheme(handIndex);
-            if (std::find(targets.begin(), targets.end(), choice.targetFighterId) == targets.end()) {
-                throw RuleViolation("Choose a valid fighter for Ravening Seduction.");
-            }
-            if (!destinationWasPrepared(choice.destinationSpace)) {
-                throw RuleViolation("Destination is not reachable for Ravening Seduction.");
-            }
-            break;
-        }
-        default:
-            break;
-    }
-
     Card card = player.removeCardFromHand(handIndex);
-    int extraActions = 0;
-    
 
-    switch (card.effect()) {
-        case EffectId::DraculaMistForm: {
-            if (!board_.contains(choice.destinationSpace) || isSpaceOccupied(choice.destinationSpace)) {
-                throw RuleViolation("Mist Form needs an empty destination.");
-            }
-            Fighter& dracula = player.heroFighter();
-            moveFighterIgnoringDistance(dracula, choice.destinationSpace);
-            extraActions = 1;
-            
-            break;
-        }
-        case EffectId::DraculaBloodBath: {
-            Fighter& dracula = player.heroFighter();
-            dracula.heal(2);
-         
-            for (auto& sister : player.fighters()) {
-                if (sister.cardOwner() == Character::Sister && sister.defeated()) {
-                    auto spaces = freeSpacesSharingHeroZone(player);
-                    if (!spaces.empty()) {
-                        sister.reviveAt(spaces.front());
-                        
-                    }
-                    break;
-                }
-            }
-            break;
-        }
-        case EffectId::DraculaHunt: {
-            Fighter& dracula = player.heroFighter();
-            int healed = 0;
-            for (auto& target : opponent.fighters()) {
-                if (!target.defeated() && board_.areAdjacentForCombat(dracula.spaceId(), target.spaceId())) {
-                    target.damage(1);
-                    ++healed;
-                    
-                }
-            }
-            dracula.heal(healed);
-           
-            break;
-        }
-        case EffectId::WatsonAid: {
-            Fighter& holmes = player.heroFighter();
-            Fighter& watson = player.fighterById("watson");
-            if (std::find(preparedDestinations.begin(), preparedDestinations.end(), choice.destinationSpace) == preparedDestinations.end()) {
-                throw RuleViolation("Watson needs a free space adjacent to Holmes.");
-            }
-            if (watson.defeated()) {
-                throw RuleViolation("Watson is defeated and cannot be placed by Aid.");
-            }
-            watson.placeAt(choice.destinationSpace);
-            holmes.heal(1);
-            drawCard(player);
-            break;
-        }
-        case EffectId::SherlockConfirmSuspicion: {
-            if (choice.namedValue < 0) {
-                throw RuleViolation("Confirm Suspicion needs a named value.");
-            }
-           
-            break;
-        }
-        case EffectId::SherlockEliminateImpossible: {
-            if (choice.opponentHandIndex < 0 || choice.opponentHandIndex >= static_cast<int>(opponent.hand().size())) {
-                throw RuleViolation("Choose a valid opponent card.");
-            }
-            Card burned = opponent.removeCardFromHand(choice.opponentHandIndex);
-           
-            opponent.addToDiscard(std::move(burned));
-            break;
-        }
-        case EffectId::SherlockMasterOfDisguise: {
-            Fighter& holmes = player.heroFighter();
-            Fighter& target = opponent.fighterById(choice.targetFighterId);
-            int holmesSpace = holmes.spaceId();
-            int targetSpace = target.spaceId();
-            holmes.placeAt(targetSpace);
-            target.placeAt(holmesSpace);
-            target.damage(1);
-          
-            break;
-        }
-        case EffectId::SisterRaveningSeduction: {
-            Fighter* target = findFighterById(choice.targetFighterId);
-            if (target == nullptr) {
-                throw RuleViolation("Choose a valid fighter for Ravening Seduction.");
-            }
-            if (std::find(preparedDestinations.begin(), preparedDestinations.end(), choice.destinationSpace) == preparedDestinations.end()) {
-                throw RuleViolation("Destination is not reachable for Ravening Seduction.");
-            }
-            target->placeAt(choice.destinationSpace);
-            int damage = 0;
-            for (const auto& sister : player.fighters()) {
-                if (!sister.defeated() && sister.cardOwner() == Character::Sister &&
-                    board_.areAdjacentForCombat(sister.spaceId(), target->spaceId())) {
-                    ++damage;
-                }
-            }
-            target->damage(damage);
-            break;
-        }
-        default:
-            break;
-    }
+    int dummyAttack = 0;
+    int dummyDefense = 0;
+    card.applyEffect(player.heroFighter(), opponent.heroFighter(), *this, dummyAttack, dummyDefense);
 
     player.addToDiscard(std::move(card));
+
     checkDefeatedFighters();
     checkWinner();
     --actionsRemaining_;
-    if (extraActions > 0) 
-    {
-        actionsRemaining_ += extraActions;
-    }
     endTurnIfNeeded();
 }
 
@@ -973,14 +773,11 @@ const Player& GameController::opponentOf(const Player& player) const {
     return playerByIndex(player.id() == 0 ? 1 : 0);
 }
 
-bool GameController::isCardPlayableBy(const Card& card, const Fighter& fighter, const Player& player) const {
+bool GameController::isCardPlayableBy(const Card& card, const Fighter& fighter) const {
     if (fighter.defeated()) {
         return false;
     }
-    if (card.owner() == Character::Any) {
-        return true;
-    }
-    return fighter.cardOwner() == card.owner() && player.hasLivingCharacter(card.owner());
+    return fighter.canPlayCard(card);
 }
 
 bool GameController::canAttackTarget(const Fighter& attacker, const Fighter& defender) const {
@@ -1013,7 +810,6 @@ bool GameController::isSpaceOccupiedByCurrentEnemy(int spaceId) const {
     return false;
 }
 
-
 void GameController::advanceTurn() {
     currentPlayerIndex_ = opponentPlayerIndex();
     actionsRemaining_ = 2;
@@ -1031,13 +827,10 @@ void GameController::drawCard(Player& player) {
     }
     Card drawn = player.deck().back();
     player.deck().pop_back();
-    std::string title = drawn.title();
     player.addToHand(std::move(drawn));
-   
 }
 
 void GameController::fatigue(Player& player) {
-  
     for (auto& fighter : player.fighters()) {
         if (!fighter.defeated()) {
             fighter.damage(2);
@@ -1081,7 +874,6 @@ void GameController::checkWinner() {
             const Player& winner = opponentOf(player);
             gameOver_ = true;
             winnerName_ = winner.name() + " (" + heroKindName(winner.hero()) + ")";
-          
             return;
         }
     }
@@ -1173,7 +965,6 @@ void GameController::queueOptionalMovement(int playerIndex,
     choice.maxSteps = maxSteps;
     choice.source = source;
     pendingOptionalMovements_.push_back(std::move(choice));
-    
 }
 
 std::vector<int> GameController::freeSpacesSharingHeroZone(const Player& player) const {
@@ -1189,11 +980,11 @@ std::vector<int> GameController::freeSpacesSharingHeroZone(const Player& player)
 
 std::vector<int> GameController::valuesOnCard(const Card& card) const {
     std::vector<int> values;
-    if (card.attack() >= 0) {
-        values.push_back(card.attack());
+    if (card.getAttack() >= 0) {
+        values.push_back(card.getAttack());
     }
-    if (card.defense() >= 0) {
-        values.push_back(card.defense());
+    if (card.getDefense() >= 0) {
+        values.push_back(card.getDefense());
     }
     std::sort(values.begin(), values.end());
     values.erase(std::unique(values.begin(), values.end()), values.end());
@@ -1204,7 +995,7 @@ bool GameController::cardEffectsProtectedBySherlock(const Card& card, const Play
     if (owner.hero() != HeroKind::Sherlock) {
         return false;
     }
-    return card.owner() == Character::Sherlock || card.owner() == Character::Watson;
+    return card.getOwner() == Character::Sherlock || card.getOwner() == Character::Watson;
 }
 
 void GameController::resolveCombatEffectAfterDamage(const Card& card,
@@ -1214,67 +1005,76 @@ void GameController::resolveCombatEffectAfterDamage(const Card& card,
                                                     Fighter& opposingFighter,
                                                     bool cardPlayerWon,
                                                     int directDamage) {
-    (void)directDamage;
-    switch (card.effect()) {
-        case EffectId::Dash:
-            queueOptionalMovement(cardPlayer.id(), cardFighter.id(), 3, card.title());
-            break;
-        case EffectId::Exploit:
+    (void)directDamage; 
+    
+    const std::string& title = card.getTitle();
+
+    if (title == "Dash") {
+        queueOptionalMovement(cardPlayer.id(), cardFighter.id(), 3, "Dash");
+        return;
+    }
+
+    if (title == "Exploit") {
+        drawCard(cardPlayer);
+        return;
+    }
+
+    if (title == "Counterpunch") {
+        if (!cardFighter.defeated() && !opposingFighter.defeated() &&
+            board_.areAdjacentForCombat(cardFighter.spaceId(), opposingFighter.spaceId())) {
+            opposingFighter.damage(2);
+        }
+        return;
+    }
+
+    if (title == "Education Never Ends") {
+        if (cardPlayerWon) {
+            drawCard(opposingPlayer); 
+        } else {
             drawCard(cardPlayer);
-            break;
-        case EffectId::SherlockCounterpunch:
-            if (!cardFighter.defeated() && !opposingFighter.defeated() &&
-                board_.areAdjacentForCombat(cardFighter.spaceId(), opposingFighter.spaceId())) {
-                opposingFighter.damage(2);
-             
-            }
-            break;
-        case EffectId::EducationNeverEnds:
-            if (cardPlayerWon) {
-                drawCard(opposingPlayer);
-            } else {
-                drawCard(cardPlayer);
-                drawCard(cardPlayer);
-            }
-            break;
-        case EffectId::SherlockFixedPoint: {
-            Fighter& holmes = cardPlayer.heroFighter();
+            drawCard(cardPlayer);
+        }
+        return;
+    }
+
+    if (title == "Fixed Point in a Changing Age" || title == "Fixed Point") {
+        Fighter& holmes = cardPlayer.heroFighter();
+        try {
             Fighter& watson = cardPlayer.fighterById("watson");
             if (!holmes.defeated() && !watson.defeated() &&
                 board_.areAdjacentForCombat(holmes.spaceId(), watson.spaceId())) {
                 holmes.heal(1);
                 watson.heal(1);
-              
             }
-            break;
+        } catch (...) {
+            // 
         }
-        case EffectId::SherlockStudyMethods:
-            if (cardPlayerWon) {
-                std::ostringstream handInfo;
-                handInfo << opposingPlayer.name() << " hand: ";
-                for (const auto& opponentCard : opposingPlayer.hand()) {
-                    handInfo << opponentCard.title() << "; ";
-                }
-                
+        return;
+    }
+
+    if (title == "Study Methods") {
+        if (cardPlayerWon) {
+            // 
+        }
+        return;
+    }
+
+    if (title == "The Game Is Afoot") {
+        queueOptionalMovement(cardPlayer.id(), cardFighter.id(), 3, "The Game Is Afoot");
+        return;
+    }
+
+    if (title == "Thirst for Sustenance") {
+        if (cardPlayerWon && !opposingFighter.defeated()) {
+            Fighter& dracula = cardPlayer.heroFighter();
+            auto adjacent = board_.freeAdjacentSpaces(opposingFighter.spaceId(), [&](int spaceId) {
+                return isSpaceOccupied(spaceId);
+            });
+            if (!adjacent.empty() && !dracula.defeated()) {
+                dracula.placeAt(adjacent.front());
             }
-            break;
-        case EffectId::SherlockGameAfoot:
-            queueOptionalMovement(cardPlayer.id(), cardFighter.id(), 3, card.title());
-            break;
-        case EffectId::SisterThirstForSustenance:
-            if (cardPlayerWon && !opposingFighter.defeated()) {
-                Fighter& dracula = cardPlayer.heroFighter();
-                auto adjacent = board_.freeAdjacentSpaces(opposingFighter.spaceId(), [&](int spaceId) {
-                    return isSpaceOccupied(spaceId);
-                });
-                if (!adjacent.empty() && !dracula.defeated()) {
-                    dracula.placeAt(adjacent.front());
-                    
-                }
-            }
-            break;
-        default:
-            break;
+        }
+        return;
     }
 }
 
@@ -1300,7 +1100,6 @@ void GameController::finishCurrentFighter(const std::string& fighterId) {
     finishedFighters_.push_back(fighterId);
 }
 
-
 int GameController::getMovementCost(const std::string& fighterId, int destinationSpace) const {
     const Fighter* fighter = findFighterById(fighterId);
     if (!fighter || fighter->defeated()) return -1;
@@ -1310,7 +1109,6 @@ int GameController::getMovementCost(const std::string& fighterId, int destinatio
 
     auto costMap = computeReachableWithCost(fighter->spaceId(), it->second, fighterId);
     if (costMap.find(destinationSpace) == costMap.end()) return -1;
-    // توقف روی هم‌رزم ممنوع
     if (isSpaceOccupiedByAlly(destinationSpace, fighterId)) return -1;
     return costMap[destinationSpace];
 }
@@ -1350,6 +1148,7 @@ std::map<int, int> GameController::computeReachableWithCost(int start, int maxSt
     }
     return cost;
 }
+
 std::vector<int> GameController::getMatchingCardIndicesForConfirmSuspicion(int namedValue) const {
     std::vector<int> result;
     const auto& hand = opponentPlayer().hand();
@@ -1369,11 +1168,22 @@ void GameController::applyConfirmSuspicion(int chosenIndex) {
         throw RuleViolation("Invalid chosen card index.");
     }
     Card burned = opponent.removeCardFromHand(chosenIndex);
-    int damage = std::max(0, burned.boost());
+    int damage = std::max(0, burned.getBoost());
     opponent.heroFighter().damage(damage);
     opponent.addToDiscard(std::move(burned));
     checkDefeatedFighters();
     checkWinner();
 }
 
-}  // namespace unmatched
+std::string heroKindName(HeroKind hero) {
+    switch (hero) {
+        case HeroKind::Dracula:
+            return "Dracula";
+        case HeroKind::Sherlock:
+            return "Sherlock Holmes";
+        default:
+            return "Unknown";
+    }
+}
+
+} // namespace unmatched

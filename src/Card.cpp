@@ -45,9 +45,10 @@ bool Card::isScheme() const {
 }
 
 void Card::applyEffect(Fighter& attacker, Fighter& defender,
-                       GameController& controller) const {
+                       GameController& controller,
+                       int& attackValue, int& defenseValue) const {
     if (effect_) {
-        effect_(attacker, defender, controller);
+        effect_(attacker, defender, controller, attackValue, defenseValue);
     }
 }
 

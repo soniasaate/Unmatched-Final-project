@@ -4,14 +4,12 @@
 #include "unmatched/Card.hpp"
 #include "unmatched/Factories.hpp"
 #include "unmatched/Player.hpp"
-
 #include <deque>
 #include <optional>
 #include <random>
 #include <string>
 #include <vector>
 #include <map>
-#include <deque>
 
 namespace unmatched {
 
@@ -72,19 +70,13 @@ public:
     std::vector<std::string> legalTargetsFor(const std::string& attackerId) const;
     std::vector<int> legalAttackCardsFor(const std::string& attackerId) const;
     std::vector<int> legalDefenseCardsFor(const std::string& defenderId) const;
-    /*void resolveAttack(const std::string& attackerId,
+    
+    void resolveAttack(const std::string& attackerId,
                        const std::string& defenderId,
                        int attackCardIndex,
                        int defenseCardIndex = -1,
-                       const std::vector<int>& beastFormBoostCardIndexes = {});
-    */
-    void resolveAttack(const std::string& attackerId,
-                   const std::string& defenderId,
-                   int attackCardIndex,
-                   int defenseCardIndex = -1,
-                   const std::vector<int>& beastFormBoostCardIndexes = {},
-                   int predictedElementaryValue = -1);
-
+                       const std::vector<int>& beastFormBoostCardIndexes = {},
+                       int predictedElementaryValue = -1);
 
     std::vector<int> legalSchemeCards() const;
     SchemeChoiceKind requiredChoiceForScheme(int handIndex) const;
@@ -121,6 +113,7 @@ private:
     std::map<std::string, int> remainingMovementPoints_;
     std::map<std::string, int> movedThisManeuver_;
     std::vector<std::string> finishedFighters_;
+    
     bool isSpaceOccupiedByEnemy(int spaceId) const;
     bool isSpaceOccupiedByAlly(int spaceId, const std::string& excludeFighterId) const;
     bool isSpaceOccupiedByAny(int spaceId) const;
@@ -129,7 +122,7 @@ private:
     Player& ownerOfFighterMutable(const std::string& fighterId);
     Player& opponentOf(const Player& player);
     const Player& opponentOf(const Player& player) const;
-    bool isCardPlayableBy(const Card& card, const Fighter& fighter, const Player& player) const;
+    bool isCardPlayableBy(const Card& card, const Fighter& fighter) const;
     bool canAttackTarget(const Fighter& attacker, const Fighter& defender) const;
     bool isSpaceOccupied(int spaceId) const;
     bool isSpaceOccupiedByCurrentEnemy(int spaceId) const;
@@ -172,4 +165,4 @@ private:
     std::map<int, int> computeReachableWithCost(int start, int maxSteps, const std::string& fighterId) const;
 };
 
-}  // namespace unmatched
+} // namespace unmatched
