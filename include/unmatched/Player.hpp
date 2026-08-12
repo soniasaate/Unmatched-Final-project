@@ -3,8 +3,7 @@
 #include "unmatched/Card.hpp"
 #include "unmatched/Fighter.hpp"
 #include "unmatched/GameExceptions.hpp"
-
-#include <optional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -18,8 +17,10 @@ public:
     const std::string& name() const;
     int age() const;
     HeroKind hero() const;
-    std::vector<Fighter>& fighters();
-    const std::vector<Fighter>& fighters() const;
+
+    std::vector<std::unique_ptr<Fighter>>& fighters();
+    const std::vector<std::unique_ptr<Fighter>>& fighters() const;
+
     std::vector<Card>& deck();
     const std::vector<Card>& deck() const;
     std::vector<Card>& hand();
@@ -31,6 +32,7 @@ public:
     const Fighter& fighterById(const std::string& fighterId) const;
     Fighter& heroFighter();
     const Fighter& heroFighter() const;
+
     std::vector<Fighter*> aliveFighters();
     std::vector<const Fighter*> aliveFighters() const;
 
@@ -44,10 +46,10 @@ private:
     std::string name_;
     int age_;
     HeroKind hero_;
-    std::vector<Fighter> fighters_;
+    std::vector<std::unique_ptr<Fighter>> fighters_;
     std::vector<Card> deck_;
     std::vector<Card> hand_;
     std::vector<Card> discardPile_;
 };
 
-}  // namespace unmatched
+} // namespace unmatched

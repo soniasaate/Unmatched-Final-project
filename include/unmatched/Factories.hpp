@@ -20,7 +20,8 @@ public:
 
 class FighterFactory {
 public:
-    std::vector<Fighter> createFighters(HeroKind hero) const;
+    //std::vector<Fighter> createFighters(HeroKind hero) const;
+    std::vector<std::unique_ptr<Fighter>> createFighters(HeroKind hero) const;
 };
 
 }  // namespace unmatched
