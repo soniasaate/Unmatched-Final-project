@@ -26,6 +26,7 @@ add_executable(unmatched_tui
     src/TuiApp.cpp
     src/Dracula.cpp     
     src/Sherlock.cpp
+    src/InvisibleMan.cpp
 )
 
 target_include_directories(unmatched_tui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)

@@ -17,6 +17,7 @@ enum class Character {
     Sister,
     Sherlock,
     Watson,
+    InvisibleMan,
 };
 
 enum class CardType {

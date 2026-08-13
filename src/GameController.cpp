@@ -2,6 +2,7 @@
 #include "unmatched/GameExceptions.hpp"
 #include "unmatched/Dracula.hpp"
 #include "unmatched/Sherlock.hpp"
+#include "unmatched/InvisibleMan.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -66,6 +67,36 @@ void GameController::startNewGame(int playerOneAge, int playerTwoAge,
     
     players_.at(static_cast<std::size_t>(youngerIndex)).heroFighter().placeAt(youngerSpace);
     players_.at(static_cast<std::size_t>(1 - youngerIndex)).heroFighter().placeAt(olderSpace);
+
+    if (auto* invisible = dynamic_cast<InvisibleMan*>(players_.at(0).fighters()[0].get())) {
+        int heroSpace = invisible->spaceId();
+        std::vector<int> fogSpaces;
+        for (const auto& space : board_.spaces()) {
+            if (board_.shareZone(heroSpace, space.id()) && 
+                !isSpaceOccupied(space.id()) && 
+                space.id() != heroSpace) {
+                fogSpaces.push_back(space.id());
+            }
+        }
+        if (fogSpaces.size() >= 3) {
+            invisible->placeFogTokens({fogSpaces[0], fogSpaces[1], fogSpaces[2]});
+        }
+    }
+
+    if (auto* invisible = dynamic_cast<InvisibleMan*>(players_.at(1).fighters()[0].get())) {
+        int heroSpace = invisible->spaceId();
+        std::vector<int> fogSpaces;
+        for (const auto& space : board_.spaces()) {
+            if (board_.shareZone(heroSpace, space.id()) && 
+                !isSpaceOccupied(space.id()) && 
+                space.id() != heroSpace) {
+                fogSpaces.push_back(space.id());
+            }
+        }
+        if (fogSpaces.size() >= 3) {
+            invisible->placeFogTokens({fogSpaces[0], fogSpaces[1], fogSpaces[2]});
+        }
+    }
 
     currentPlayerIndex_ = youngerIndex;
     placeSidekicks(currentPlayer());
@@ -697,6 +728,7 @@ void GameController::resolvePendingOptionalMovement(int destinationSpace) {
 
 std::map<int, std::string> GameController::occupantTokens() const {
     std::map<int, std::string> result;
+    
     for (const auto& player : players_) {
         for (const auto& fighter : player.fighters()) {
             if (fighter->defeated()) {
@@ -711,12 +743,24 @@ std::map<int, std::string> GameController::occupantTokens() const {
                 token = "H";
             } else if (fighter->id() == "watson") {
                 token = "W";
+            } else if (fighter->id() == "invisible_man") {
+                token = "I";
             } else {
                 token = "?";
             }
             result[fighter->spaceId()] = token;
         }
+        
+        const Fighter& hero = player.heroFighter();
+        if (auto* invisible = dynamic_cast<const InvisibleMan*>(&hero)) {
+            for (int fogSpace : invisible->getFogTokens()) {
+                if (fogSpace != -1) {
+                    result[fogSpace] = "F";
+                }
+            }
+        }
     }
+    
     return result;
 }
 

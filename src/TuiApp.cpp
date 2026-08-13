@@ -3,7 +3,7 @@
 #include "unmatched/GameExceptions.hpp"
 #include "unmatched/Dracula.hpp"
 #include "unmatched/Sherlock.hpp"
-
+#include "unmatched/InvisibleMan.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iomanip>
@@ -56,6 +56,8 @@ std::string fighterTypeName(const Fighter& fighter) {
         return "Dracula";
     } else if (dynamic_cast<const Sherlock*>(&fighter)) {
         return "Sherlock Holmes";
+    } else if (dynamic_cast<const InvisibleMan*>(&fighter)) {
+        return "Invisible Man";
     }
     return "Unknown";
 }
@@ -65,6 +67,8 @@ ftxui::Color fighterColor(const Fighter& fighter) {
         return ftxui::Color::Red;
     } else if (dynamic_cast<const Sherlock*>(&fighter)) {
         return ftxui::Color::Blue;
+    } else if (dynamic_cast<const InvisibleMan*>(&fighter)) {
+        return ftxui::Color::Cyan;
     }
     return ftxui::Color::White;
 }
@@ -244,11 +248,31 @@ Element TuiApp::renderGameOver() const {
 Element TuiApp::renderPlayerPanel(const Player& player, bool active) const {
     const Fighter& hero = player.heroFighter();
     Elements rows;
-    rows.push_back(text(player.name() + " - " + fighterTypeName(hero)) | bold | color(fighterColor(hero)));
+    
+    std::string heroName = fighterTypeName(hero);
+    rows.push_back(text(player.name() + " - " + heroName) | bold | color(fighterColor(hero)));
     rows.push_back(text(active ? "ACTIVE TURN" : "Waiting") | color(active ? Color::Green : Color::GrayDark));
+    
     for (const auto& fighter : player.fighters()) {
         rows.push_back(fighterLine(*fighter));
     }
+    
+    // ===== نمایش توکن‌های مه =====
+    if (auto* invisible = dynamic_cast<const InvisibleMan*>(&hero)) {
+        std::string fogInfo = "Fog Tokens: ";
+        bool first = true;
+        for (int space : invisible->getFogTokens()) {
+            if (!first) fogInfo += ", ";
+            if (space == -1) {
+                fogInfo += "(not placed)";
+            } else {
+                fogInfo += "Space " + std::to_string(space);
+            }
+            first = false;
+        }
+        rows.push_back(text(fogInfo) | dim);
+    }
+    
     rows.push_back(text("Deck: " + std::to_string(player.deck().size()) +
                         "   Hand: " + std::to_string(player.hand().size()) +
                         "   Discard: " + std::to_string(player.discardPile().size())));
@@ -331,7 +355,7 @@ Element TuiApp::renderMapPanel() const {
         lines.push_back(text(line));
     }
     lines.push_back(separator());
-    lines.push_back(text("Legend: [D] Dracula  [Si] Sister  [H] Holmes  [W] Watson  (~id) Secret passage  <S1>/<S2> Start") | dim);
+    lines.push_back(text("Legend: [D] Dracula  [Si] Sister  [H] Holmes  [W] Watson  [I] Invisible Man  [F] Fog Token  (~id) Secret passage  <S1>/<S2> Start") | dim);
     return window(text("Board"), vbox(std::move(lines)));
 }
 
@@ -451,8 +475,26 @@ void TuiApp::handleEnter() {
         case ScreenState::FighterSelect:
             if (selected_ == 0) {
                 selectedHero_ = std::make_unique<Dracula>();
-            } else {
+                remainingHeroes_.push_back(std::make_unique<Sherlock>());
+                remainingHeroes_.push_back(std::make_unique<InvisibleMan>());
+            } else if (selected_ == 1) {
                 selectedHero_ = std::make_unique<Sherlock>();
+                remainingHeroes_.push_back(std::make_unique<Dracula>());
+                remainingHeroes_.push_back(std::make_unique<InvisibleMan>());
+            } else {
+                selectedHero_ = std::make_unique<InvisibleMan>();
+                remainingHeroes_.push_back(std::make_unique<Dracula>());
+                remainingHeroes_.push_back(std::make_unique<Sherlock>());
+            }
+            state_ = ScreenState::FighterSelectSecond;
+            resetSelection();
+            break;
+
+        case ScreenState::FighterSelectSecond:
+            if (selected_ == 0) {
+                secondHero_ = std::move(remainingHeroes_[0]);
+            } else {
+                secondHero_ = std::move(remainingHeroes_[1]);
             }
             state_ = ScreenState::StartSelect;
             resetSelection();
@@ -870,7 +912,20 @@ std::vector<std::string> TuiApp::currentMenuEntries() const {
         case ScreenState::Help:
             return {controller_.started() ? "Back to game" : "Back to main menu"};
         case ScreenState::FighterSelect:
-            return {"Dracula", "Sherlock Holmes"};
+            return {"Dracula", "Sherlock Holmes" , "Invisible Man"};
+        case ScreenState::FighterSelectSecond: {
+            std::vector<std::string> entries;
+            for (const auto& hero : remainingHeroes_) {
+                if (dynamic_cast<Dracula*>(hero.get())) {
+                    entries.push_back("Dracula");
+                } else if (dynamic_cast<Sherlock*>(hero.get())) {
+                    entries.push_back("Sherlock Holmes");
+                } else if (dynamic_cast<InvisibleMan*>(hero.get())) {
+                    entries.push_back("Invisible Man");
+                }
+            }
+            return entries;
+        }
         case ScreenState::StartSelect:
             return {"Start Space 1", "Start Space 2"};
         case ScreenState::Game: {
@@ -1064,10 +1119,13 @@ void TuiApp::startGameFromSetup() {
     
     if (dynamic_cast<Dracula*>(selectedHero_.get())) {
         hero1 = std::make_unique<Dracula>();
-        hero2 = std::make_unique<Sherlock>();
-    } else {
+        hero2 = std::move(secondHero_);
+    } else if (dynamic_cast<Sherlock*>(selectedHero_.get())) {
         hero1 = std::make_unique<Sherlock>();
-        hero2 = std::make_unique<Dracula>();
+        hero2 = std::move(secondHero_);
+    } else if (dynamic_cast<InvisibleMan*>(selectedHero_.get())) {
+        hero1 = std::make_unique<InvisibleMan>();
+        hero2 = std::move(secondHero_);
     }
     
     controller_.startNewGame(playerOneAge_, playerTwoAge_, std::move(hero1), std::move(hero2), selectedStartSlot_);

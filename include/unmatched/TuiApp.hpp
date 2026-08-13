@@ -29,6 +29,7 @@ private:
         Settings,
         SetupAge,
         FighterSelect,
+        FighterSelectSecond,
         StartSelect,
         Game,
         ManeuverBoost,
@@ -95,6 +96,8 @@ private:
     int playerOneAge_;
     int playerTwoAge_;
     std::unique_ptr<Fighter> selectedHero_;
+    std::unique_ptr<Fighter> secondHero_;
+    std::vector<std::unique_ptr<Fighter>> remainingHeroes_;
     int selectedStartSlot_;
     std::string errorMessage_;
     bool asciiOnlyMode_;
