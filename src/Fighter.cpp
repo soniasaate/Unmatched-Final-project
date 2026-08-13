@@ -134,4 +134,12 @@ void Fighter::onSchemeEffect(const Card&) {
 void Fighter::onTurnStart() {
 }
 
+std::vector<Card> Fighter::createDeck() const {
+    return {}; 
+}
+
+std::vector<std::unique_ptr<Fighter>> Fighter::createSidekicks() const {
+    return {};  
+}
+
 } // namespace unmatched

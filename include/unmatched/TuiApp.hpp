@@ -1,11 +1,14 @@
 #pragma once
 
 #include "unmatched/GameController.hpp"
+#include "unmatched/Dracula.hpp"
+#include "unmatched/Sherlock.hpp"
 
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -82,7 +85,6 @@ private:
     ftxui::Element menuLine(const std::string& label, bool selected) const;
     ftxui::Element cardElement(const Card& card, int index, bool highlighted, bool activeOwner) const;
     ftxui::Element fighterLine(const Fighter& fighter) const;
-    ftxui::Color heroColor(HeroKind hero) const;
 
     ftxui::ScreenInteractive& screen_;
     GameController controller_;
@@ -92,7 +94,7 @@ private:
     int ageStep_;
     int playerOneAge_;
     int playerTwoAge_;
-    HeroKind selectedHero_;
+    std::unique_ptr<Fighter> selectedHero_;
     int selectedStartSlot_;
     std::string errorMessage_;
     bool asciiOnlyMode_;
@@ -111,4 +113,4 @@ private:
     SchemeChoice schemeChoice_;
 };
 
-}  // namespace unmatched
+} // namespace unmatched

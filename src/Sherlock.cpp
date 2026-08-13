@@ -1,4 +1,5 @@
 #include "unmatched/Sherlock.hpp"
+#include "unmatched/Factories.hpp"
 
 namespace unmatched {
 
@@ -28,7 +29,7 @@ std::string Sherlock::getSpecialAbility() const {
 }
 
 bool Sherlock::canPlayCard(const Card& card) const {
-    return card.owner() == Character::Sherlock || card.owner() == Character::Any;
+    return card.getOwner() == Character::Sherlock || card.getOwner() == Character::Any;
 }
 
 Fighter& Sherlock::getWatson() {
@@ -37,6 +38,18 @@ Fighter& Sherlock::getWatson() {
 
 const Fighter& Sherlock::getWatson() const {
     return watson_;
+}
+
+std::vector<Card> Sherlock::createDeck() const {
+    return DeckFactory().createDeckForSherlock();
+}
+
+std::vector<std::unique_ptr<Fighter>> Sherlock::createSidekicks() const {
+    std::vector<std::unique_ptr<Fighter>> sidekicks;
+    sidekicks.push_back(std::make_unique<Fighter>(
+        FighterDefinition("watson", "Dr. Watson", Character::Watson, false, 8, 2, AttackRange::Ranged, "Support")
+    ));
+    return sidekicks;
 }
 
 } // namespace unmatched

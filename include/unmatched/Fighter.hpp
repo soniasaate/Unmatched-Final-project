@@ -4,7 +4,9 @@
 #include "unmatched/GameExceptions.hpp"
 #include "unmatched/GameEntity.hpp"
 #include "unmatched/Card.hpp"
+#include <memory>
 #include <string>
+#include <vector>
 
 namespace unmatched {
 
@@ -41,6 +43,9 @@ public:
                                 Fighter& opponent);
     virtual void onSchemeEffect(const Card& card);
     virtual void onTurnStart();
+
+    virtual std::vector<Card> createDeck() const ;
+    virtual std::vector<std::unique_ptr<Fighter>> createSidekicks() const ;
 
 private:
     FighterDefinition definition_;

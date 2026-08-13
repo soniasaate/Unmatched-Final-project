@@ -6,10 +6,10 @@
 
 namespace unmatched {
 
-enum class HeroKind {
+/*enum class HeroKind {
     Dracula,
     Sherlock,
-};
+};*/
 
 enum class Character {
     Any,

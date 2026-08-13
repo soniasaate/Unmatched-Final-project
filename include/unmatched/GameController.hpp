@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <random>
 
 namespace unmatched {
 
@@ -40,7 +41,10 @@ class GameController {
 public:
     GameController();
 
-    void startNewGame(int playerOneAge, int playerTwoAge, HeroKind youngerHero, int youngerStartSlot);
+    void startNewGame(int playerOneAge, int playerTwoAge, 
+                  std::unique_ptr<Fighter> hero1, 
+                  std::unique_ptr<Fighter> hero2, 
+                  int youngerStartSlot);
     bool started() const;
     bool gameOver() const;
     const std::string& winnerName() const;
@@ -109,6 +113,14 @@ public:
     int remainingMovementForFighter(const std::string& fighterId) const;
     void decrementActions() { --actionsRemaining_; }
 
+    bool isSpaceOccupied(int spaceId) const;
+    void drawCard(Player& player);
+    void queueOptionalMovement(int playerIndex, const std::string& fighterId, int maxSteps, const std::string& source);
+    int getRandomInt(int min, int max) {
+        std::uniform_int_distribution<int> dist(min, max);
+        return dist(random_);
+    }
+
 private:
     std::map<std::string, int> remainingMovementPoints_;
     std::map<std::string, int> movedThisManeuver_;
@@ -124,10 +136,8 @@ private:
     const Player& opponentOf(const Player& player) const;
     bool isCardPlayableBy(const Card& card, const Fighter& fighter) const;
     bool canAttackTarget(const Fighter& attacker, const Fighter& defender) const;
-    bool isSpaceOccupied(int spaceId) const;
     bool isSpaceOccupiedByCurrentEnemy(int spaceId) const;
     void advanceTurn();
-    void drawCard(Player& player);
     void fatigue(Player& player);
     void placeSidekicks(Player& player);
     void checkDefeatedFighters();
@@ -136,7 +146,6 @@ private:
     int countLivingSistersInZoneWith(int spaceId) const;
     void moveFighterIgnoringDistance(Fighter& fighter, int destinationSpace);
     std::vector<int> reachableForPlayerFighter(int playerIndex, const std::string& fighterId, int maxSteps) const;
-    void queueOptionalMovement(int playerIndex, const std::string& fighterId, int maxSteps, const std::string& source);
     std::vector<int> freeSpacesSharingHeroZone(const Player& player) const;
     std::vector<int> valuesOnCard(const Card& card) const;
     bool cardEffectsProtectedBySherlock(const Card& card, const Player& owner) const;

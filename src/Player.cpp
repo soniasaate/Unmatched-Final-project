@@ -4,8 +4,8 @@
 
 namespace unmatched {
 
-Player::Player(int id, std::string name, int age, HeroKind hero)
-    : id_(id), name_(std::move(name)), age_(age), hero_(hero) {}
+Player::Player(int id, std::string name, int age )
+    : id_(id), name_(std::move(name)), age_(age) {}
 
 int Player::id() const {
     return id_;
@@ -19,9 +19,9 @@ int Player::age() const {
     return age_;
 }
 
-HeroKind Player::hero() const {
+/*HeroKind Player::hero() const {
     return hero_;
-}
+}*/
 
 std::vector<std::unique_ptr<Fighter>>& Player::fighters() {
     return fighters_;

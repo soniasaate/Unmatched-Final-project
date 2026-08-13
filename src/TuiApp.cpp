@@ -1,6 +1,8 @@
 #include "unmatched/TuiApp.hpp"
 
 #include "unmatched/GameExceptions.hpp"
+#include "unmatched/Dracula.hpp"
+#include "unmatched/Sherlock.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -28,6 +30,45 @@ std::string hpBar(int current, int maximum) {
     return "[" + repeat('#', filled) + repeat('.', width - filled) + "]";
 }
 
+std::string cardTypeToString(CardType type) {
+    switch (type) {
+        case CardType::Attack: return "Attack";
+        case CardType::Defense: return "Defense";
+        case CardType::Versatile: return "Versatile";
+        case CardType::Scheme: return "Scheme";
+        default: return "Unknown";
+    }
+}
+
+std::string characterToString(Character owner) {
+    switch (owner) {
+        case Character::Any: return "Any";
+        case Character::Dracula: return "Dracula";
+        case Character::Sister: return "Sister";
+        case Character::Sherlock: return "Sherlock";
+        case Character::Watson: return "Watson";
+        default: return "Unknown";
+    }
+}
+
+std::string fighterTypeName(const Fighter& fighter) {
+    if (dynamic_cast<const Dracula*>(&fighter)) {
+        return "Dracula";
+    } else if (dynamic_cast<const Sherlock*>(&fighter)) {
+        return "Sherlock Holmes";
+    }
+    return "Unknown";
+}
+
+ftxui::Color fighterColor(const Fighter& fighter) {
+    if (dynamic_cast<const Dracula*>(&fighter)) {
+        return ftxui::Color::Red;
+    } else if (dynamic_cast<const Sherlock*>(&fighter)) {
+        return ftxui::Color::Blue;
+    }
+    return ftxui::Color::White;
+}
+
 }  // namespace
 
 using namespace ftxui;
@@ -39,7 +80,7 @@ TuiApp::TuiApp(ScreenInteractive& screen)
       ageStep_(0),
       playerOneAge_(0),
       playerTwoAge_(0),
-      selectedHero_(HeroKind::Dracula),
+      selectedHero_(nullptr),
       selectedStartSlot_(1),
       asciiOnlyMode_(true),
       selectedAttackCardIndex_(-1),
@@ -110,7 +151,6 @@ Element TuiApp::renderHelp() const {
     return vbox(std::move(rules)) | border | size(WIDTH, GREATER_THAN, 92) | center;
 }
 
-
 Element TuiApp::renderSetupAge() const {
     std::string prompt = ageStep_ == 0 ? "Enter Player 1 age" : "Enter Player 2 age";
     Elements body;
@@ -162,13 +202,14 @@ Element TuiApp::renderGame() const {
     std::string title = "UNMATCHED TUI - Dracula vs Sherlock Holmes";
     page.push_back(text(title) | bold | center);
     
+    const Fighter& hero = controller_.currentPlayer().heroFighter();
     page.push_back(text("Turn " + std::to_string(controller_.turnNumber()) + " - " +
                     controller_.currentPlayer().name() + " / " +
-                    heroKindName(controller_.currentPlayer().hero()) +
+                    fighterTypeName(hero) +
                     " - Actions: " + std::to_string(controller_.actionsRemaining()) +
                     " - Moves: " + std::to_string(controller_.pendingMovementPoints()) + "/" + 
                     std::to_string(controller_.maxMovementPoints())) |
-               color(heroColor(controller_.currentPlayer().hero())) | center);               
+               color(fighterColor(hero)) | center);               
     page.push_back(separator());
     page.push_back(hbox({
         renderPlayerPanel(players.at(0), controller_.currentPlayerIndex() == 0) | size(WIDTH, EQUAL, 34 ),
@@ -200,22 +241,24 @@ Element TuiApp::renderGameOver() const {
     return vbox(std::move(body)) | border | center | size(WIDTH, GREATER_THAN, 70);
 }
 
-
 Element TuiApp::renderPlayerPanel(const Player& player, bool active) const {
+    const Fighter& hero = player.heroFighter();
     Elements rows;
-    rows.push_back(text(player.name() + " - " + heroKindName(player.hero())) | bold | color(heroColor(player.hero())));
+    rows.push_back(text(player.name() + " - " + fighterTypeName(hero)) | bold | color(fighterColor(hero)));
     rows.push_back(text(active ? "ACTIVE TURN" : "Waiting") | color(active ? Color::Green : Color::GrayDark));
     for (const auto& fighter : player.fighters()) {
-        rows.push_back(fighterLine(fighter));
+        rows.push_back(fighterLine(*fighter));
     }
     rows.push_back(text("Deck: " + std::to_string(player.deck().size()) +
                         "   Hand: " + std::to_string(player.hand().size()) +
                         "   Discard: " + std::to_string(player.discardPile().size())));
     return vbox(std::move(rows));
 }
+
 Element TuiApp::renderHandPanel(const Player& player, bool active) const {
+    const Fighter& hero = player.heroFighter();
     Elements rows;
-    rows.push_back(text(player.name() + " Hand") | bold | color(active ? heroColor(player.hero()) : Color::White));
+    rows.push_back(text(player.name() + " Hand") | bold | color(active ? fighterColor(hero) : Color::White));
     rows.push_back(separator());
     if (player.hand().empty()) {
         rows.push_back(text("(empty)") | dim);
@@ -291,7 +334,6 @@ Element TuiApp::renderMapPanel() const {
     lines.push_back(text("Legend: [D] Dracula  [Si] Sister  [H] Holmes  [W] Watson  (~id) Secret passage  <S1>/<S2> Start") | dim);
     return window(text("Board"), vbox(std::move(lines)));
 }
-
 
 Element TuiApp::renderMenuLines(const std::vector<std::string>& entries, const std::string& title) const {
     Elements rows;
@@ -407,7 +449,11 @@ void TuiApp::handleEnter() {
         }
 
         case ScreenState::FighterSelect:
-            selectedHero_ = selected_ == 0 ? HeroKind::Dracula : HeroKind::Sherlock;
+            if (selected_ == 0) {
+                selectedHero_ = std::make_unique<Dracula>();
+            } else {
+                selectedHero_ = std::make_unique<Sherlock>();
+            }
             state_ = ScreenState::StartSelect;
             resetSelection();
             break;
@@ -433,9 +479,9 @@ void TuiApp::handleEnter() {
                 const Fighter& dracula = controller_.currentPlayer().heroFighter();
                 for (const auto& player : controller_.players()) {
                     for (const auto& fighter : player.fighters()) {
-                        if (!fighter.defeated() && fighter.id() != dracula.id() &&
-                            controller_.board().areAdjacentForCombat(dracula.spaceId(), fighter.spaceId())) {
-                            pendingFighterIds_.push_back(fighter.id());
+                        if (!fighter->defeated() && fighter->id() != dracula.id() &&
+                            controller_.board().areAdjacentForCombat(dracula.spaceId(), fighter->spaceId())) {
+                            pendingFighterIds_.push_back(fighter->id());
                         }
                     }
                 }
@@ -605,8 +651,7 @@ void TuiApp::handleEnter() {
             }
             selectedAttackCardIndex_ = pendingCardIndexes_.at(static_cast<std::size_t>(selected_));
             selectedBeastFormBoostIndexes_.clear();
-            if (controller_.currentPlayer().hand().at(static_cast<std::size_t>(selectedAttackCardIndex_)).effect() ==
-                EffectId::DraculaBeastForm) {
+            if (controller_.currentPlayer().hand().at(static_cast<std::size_t>(selectedAttackCardIndex_)).getTitle() == "Beast Form") {
                 pendingCardIndexes_.clear();
                 for (int i = 0; i < static_cast<int>(controller_.currentPlayer().hand().size()); ++i) {
                     if (i != selectedAttackCardIndex_) {
@@ -678,7 +723,7 @@ void TuiApp::handleEnter() {
             }
             int defenseIndex = pendingCardIndexes_.at(static_cast<std::size_t>(index));
             const Card& defenseCard = controller_.opponentPlayer().hand().at(defenseIndex);
-            if (defenseCard.effect() == EffectId::SherlockElementary) {
+            if (defenseCard.getTitle() == "Elementary") {
                 selectedDefenseCardIndex_ = defenseIndex;
                 pendingValues_.clear();
                 for (int v = 0; v <= 6; ++v) {
@@ -1014,7 +1059,18 @@ void TuiApp::openGameScreen() {
 }
 
 void TuiApp::startGameFromSetup() {
-    controller_.startNewGame(playerOneAge_, playerTwoAge_, selectedHero_, selectedStartSlot_);
+    std::unique_ptr<Fighter> hero1;
+    std::unique_ptr<Fighter> hero2;
+    
+    if (dynamic_cast<Dracula*>(selectedHero_.get())) {
+        hero1 = std::make_unique<Dracula>();
+        hero2 = std::make_unique<Sherlock>();
+    } else {
+        hero1 = std::make_unique<Sherlock>();
+        hero2 = std::make_unique<Dracula>();
+    }
+    
+    controller_.startNewGame(playerOneAge_, playerTwoAge_, std::move(hero1), std::move(hero2), selectedStartSlot_);
     state_ = ScreenState::Game;
     resetSelection();
 }
@@ -1103,8 +1159,6 @@ void TuiApp::chooseSchemeCard(int selectedMenuIndex) {
     resetSelection();
 }
 
-
-
 std::string TuiApp::fighterMenuLabel(const std::string& fighterId) const {
     const Fighter* fighter = controller_.findFighterById(fighterId);
     if (!fighter) return fighterId;
@@ -1117,6 +1171,7 @@ std::string TuiApp::fighterMenuLabel(const std::string& fighterId) const {
     }
     return label.str();
 }
+
 void TuiApp::completeSchemeChoice() {
     SchemeChoiceKind kind = controller_.requiredChoiceForScheme(selectedSchemeCardIndex_);
     
@@ -1138,7 +1193,7 @@ void TuiApp::completeSchemeChoice() {
         }
         int namedValue = pendingValues_.at(static_cast<std::size_t>(selected_));
         const Card& card = controller_.currentPlayer().hand().at(selectedSchemeCardIndex_);
-        if (card.effect() == EffectId::SherlockConfirmSuspicion) {
+        if (card.getTitle() == "Confirm Suspicion") {
             auto matching = controller_.getMatchingCardIndicesForConfirmSuspicion(namedValue);
             if (matching.empty()) {
                 Card played = controller_.currentPlayer().removeCardFromHand(selectedSchemeCardIndex_);
@@ -1203,7 +1258,11 @@ void TuiApp::completeSchemeChoice() {
         schemeChoice_.destinationSpace = pendingSpaces_.at(static_cast<std::size_t>(selected_));
         controller_.playScheme(selectedSchemeCardIndex_, schemeChoice_);
         openGameScreen();
+        return;
     }
+
+    showError("Invalid scheme choice.");
+    openGameScreen();
 }
 
 std::string TuiApp::cardMenuLabel(const Player& player, int handIndex) const {
@@ -1212,13 +1271,15 @@ std::string TuiApp::cardMenuLabel(const Player& player, int handIndex) const {
     }
     const Card& card = player.hand().at(static_cast<std::size_t>(handIndex));
     std::ostringstream label;
-    label << (handIndex + 1) << ". " << card.title() << " [" << card.typeLabel() << "]"
-          << " owner=" << card.ownerLabel() << " boost=" << card.boost();
-    if (card.attack() >= 0) {
-        label << " atk=" << card.attack();
+    label << (handIndex + 1) << ". " << card.getTitle()
+          << " [" << cardTypeToString(card.getType()) << "]"
+          << " owner=" << characterToString(card.getOwner())
+          << " boost=" << card.getBoost();
+    if (card.getAttack() >= 0) {
+        label << " atk=" << card.getAttack();
     }
-    if (card.defense() >= 0) {
-        label << " def=" << card.defense();
+    if (card.getDefense() >= 0) {
+        label << " def=" << card.getDefense();
     }
     return label.str();
 }
@@ -1249,14 +1310,14 @@ Element TuiApp::menuLine(const std::string& label, bool selected) const {
 
 Element TuiApp::cardElement(const Card& card, int index, bool highlighted, bool activeOwner) const {
     std::ostringstream line;
-    line << std::setw(2) << (index + 1) << " " << fixedWidth(card.title(), 22)
-         << " " << fixedWidth(card.typeLabel(), 9)
-         << " B" << card.boost();
-    if (card.attack() >= 0) {
-        line << " A" << card.attack();
+    line << std::setw(2) << (index + 1) << " " << fixedWidth(card.getTitle(), 22)
+         << " " << fixedWidth(cardTypeToString(card.getType()), 9)
+         << " B" << card.getBoost();
+    if (card.getAttack() >= 0) {
+        line << " A" << card.getAttack();
     }
-    if (card.defense() >= 0) {
-        line << " D" << card.defense();
+    if (card.getDefense() >= 0) {
+        line << " D" << card.getDefense();
     }
     auto element = text(line.str());
     if (highlighted) {
@@ -1283,8 +1344,4 @@ Element TuiApp::fighterLine(const Fighter& fighter) const {
     return text(line.str());
 }
 
-Color TuiApp::heroColor(HeroKind hero) const {
-    return hero == HeroKind::Dracula ? Color::Red : Color::Blue;
-}
-
-}  // namespace unmatched 
+}  // namespace unmatched

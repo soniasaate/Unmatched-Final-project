@@ -1,4 +1,5 @@
 #include "unmatched/Dracula.hpp"
+#include "unmatched/Factories.hpp"
 
 namespace unmatched {
 
@@ -34,6 +35,24 @@ bool Dracula::canPlayCard(const Card& card) const {
     return card.getOwner() == Character::Dracula || card.getOwner() == Character::Any;
 }
 
+std::vector<Card> Dracula::createDeck() const {
+    return DeckFactory().createDeckForDracula();
+}
+
+std::vector<std::unique_ptr<Fighter>> Dracula::createSidekicks() const {
+    std::vector<std::unique_ptr<Fighter>> sidekicks;
+    sidekicks.push_back(std::make_unique<Fighter>(
+        FighterDefinition("sister1", "Sister I", Character::Sister, false, 1, 2, AttackRange::Melee, "Sidekick")
+    ));
+    sidekicks.push_back(std::make_unique<Fighter>(
+        FighterDefinition("sister2", "Sister II", Character::Sister, false, 1, 2, AttackRange::Melee, "Sidekick")
+    ));
+    sidekicks.push_back(std::make_unique<Fighter>(
+        FighterDefinition("sister3", "Sister III", Character::Sister, false, 1, 2, AttackRange::Melee, "Sidekick")
+    ));
+    return sidekicks;
+}
+
 std::vector<Fighter>& Dracula::getSisters() {
     return sisters_;
 }
@@ -43,7 +62,6 @@ const std::vector<Fighter>& Dracula::getSisters() const {
 }
 
 void Dracula::useBloodStrike(int) {
-    //بعدا
 }
 
 void Dracula::activateMistForm() {

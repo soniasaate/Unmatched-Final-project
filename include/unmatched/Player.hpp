@@ -11,12 +11,12 @@ namespace unmatched {
 
 class Player {
 public:
-    Player(int id, std::string name, int age, HeroKind hero);
+    Player(int id, std::string name, int age);
 
     int id() const;
     const std::string& name() const;
     int age() const;
-    HeroKind hero() const;
+    //HeroKind hero() const;
 
     std::vector<std::unique_ptr<Fighter>>& fighters();
     const std::vector<std::unique_ptr<Fighter>>& fighters() const;
@@ -45,7 +45,7 @@ private:
     int id_;
     std::string name_;
     int age_;
-    HeroKind hero_;
+    //HeroKind hero_;
     std::vector<std::unique_ptr<Fighter>> fighters_;
     std::vector<Card> deck_;
     std::vector<Card> hand_;

@@ -7,7 +7,7 @@ namespace unmatched {
 
 Card::Card(std::string id, std::string name, Character owner,
            CardType type, int attack, int defense, int boost, Timing timing,
-           std::function<void(Fighter&, Fighter&, GameController&)> effect)
+           std::function<void(Fighter&, Fighter&, GameController&, int&, int&)> effect)
     : GameEntity(std::move(id), std::move(name))
     , owner_(owner)
     , type_(type)
