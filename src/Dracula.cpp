@@ -32,7 +32,16 @@ std::string Dracula::getSpecialAbility() const {
 }
 
 bool Dracula::canPlayCard(const Card& card) const {
-    return card.getOwner() == Character::Dracula || card.getOwner() == Character::Any;
+    if (card.getOwner() == Character::Dracula || card.getOwner() == Character::Any) {
+        return true;
+    }
+    if (card.getOwner() == Character::Sister) {
+        for (const auto& sister : getSisters()) {
+            if (!sister.defeated()) return true;
+        }
+        return false;
+    }
+    return false;
 }
 
 std::vector<Card> Dracula::createDeck() const {

@@ -48,6 +48,10 @@ private:
         DiscardToLimit,
         DraculaAbilityTarget,
         OptionalMovementDestination,
+        PlaceVanishedInvisibleMan,
+        StudyMethodsView,
+        ConfoundChoice,
+        ConfirmSuspicionNoMatchView,
         GameOver,
     };
 
@@ -62,6 +66,9 @@ private:
     ftxui::Element renderHandPanel(const Player& player, bool active) const;
     ftxui::Element renderActionPanel() const;
     ftxui::Element renderMapPanel() const;
+    ftxui::Element renderStudyMethodsView() const;
+    ftxui::Element renderConfoundChoiceView() const;
+    ftxui::Element renderConfirmSuspicionNoMatchView() const;
     ftxui::Element renderMenuLines(const std::vector<std::string>& entries, const std::string& title) const;
 
     bool handleEvent(ftxui::Event event);
@@ -101,6 +108,7 @@ private:
     int selectedStartSlot_;
     std::string errorMessage_;
     bool asciiOnlyMode_;
+    bool waitingForDestination_;
 
     std::vector<std::string> pendingFighterIds_;
     std::vector<int> pendingCardIndexes_;
@@ -114,6 +122,7 @@ private:
     int selectedSchemeCardIndex_;
     std::vector<int> selectedBeastFormBoostIndexes_;
     SchemeChoice schemeChoice_;
+    int confoundCardIndex_ = -1;
 };
 
 } // namespace unmatched

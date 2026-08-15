@@ -40,16 +40,34 @@ const std::vector<int>& InvisibleMan::getFogTokens() const {
     return fogTokens_;
 }
 
-void InvisibleMan::placeFogToken(int index, int spaceId) {
+void InvisibleMan::moveFogToken(int index, int spaceId) {
     if (index < 0 || index >= static_cast<int>(fogTokens_.size())) {
         throw RuleViolation("Invalid fog token index.");
+    }
+    if (spaceId == -1) {
+        fogTokens_[index] = -1;
+        return;
+    }
+    for (int i = 0; i < static_cast<int>(fogTokens_.size()); ++i) {
+        if (i != index && fogTokens_[i] == spaceId) {
+            throw RuleViolation("Another fog token is already at this space.");
+        }
     }
     fogTokens_[index] = spaceId;
 }
 
-void InvisibleMan::moveFogToken(int index, int spaceId) {
+void InvisibleMan::placeFogToken(int index, int spaceId) {
     if (index < 0 || index >= static_cast<int>(fogTokens_.size())) {
         throw RuleViolation("Invalid fog token index.");
+    }
+    if (spaceId == -1) {
+        fogTokens_[index] = -1;
+        return;
+    }
+    for (int i = 0; i < static_cast<int>(fogTokens_.size()); ++i) {
+        if (i != index && fogTokens_[i] == spaceId) {
+            throw RuleViolation("Another fog token is already at this space.");
+        }
     }
     fogTokens_[index] = spaceId;
 }
@@ -57,6 +75,13 @@ void InvisibleMan::moveFogToken(int index, int spaceId) {
 void InvisibleMan::placeFogTokens(const std::vector<int>& spaces) {
     for (size_t i = 0; i < fogTokens_.size() && i < spaces.size(); ++i) {
         fogTokens_[i] = spaces[i];
+    }
+    for (int i = 0; i < static_cast<int>(fogTokens_.size()); ++i) {
+        for (int j = i + 1; j < static_cast<int>(fogTokens_.size()); ++j) {
+            if (fogTokens_[i] != -1 && fogTokens_[i] == fogTokens_[j]) {
+                throw InvalidSetup("Fog tokens cannot be placed on the same space.");
+            }
+        }
     }
 }
 

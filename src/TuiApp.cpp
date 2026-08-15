@@ -87,6 +87,7 @@ TuiApp::TuiApp(ScreenInteractive& screen)
       selectedHero_(nullptr),
       selectedStartSlot_(1),
       asciiOnlyMode_(true),
+      waitingForDestination_(false),
       selectedAttackCardIndex_(-1),
       selectedSchemeCardIndex_(-1) {}
 
@@ -104,9 +105,53 @@ Element TuiApp::Render() {
             return renderStartSelect();
         case ScreenState::GameOver:
             return renderGameOver();
+        case ScreenState::StudyMethodsView:
+            return renderStudyMethodsView();
+        case ScreenState::ConfoundChoice:
+            return renderConfoundChoiceView();
+        case ScreenState::ConfirmSuspicionNoMatchView:
+            return renderConfirmSuspicionNoMatchView();
         default:
             return renderGame();
     }
+}
+
+Element TuiApp::renderConfoundChoiceView() const {
+    Elements body;
+    body.push_back(text("CONFOUND") | bold | color(Color::Yellow) | center);
+    body.push_back(separator());
+    body.push_back(text("Opponent may discard 1 card from hand. Do you want to discard a card?") | center);
+    body.push_back(separator());
+    body.push_back(menuLine("[1] Yes, discard a card", selected_ == 0));
+    body.push_back(menuLine("[2] No, skip discarding", selected_ == 1));
+    body.push_back(separator());
+    body.push_back(text("Use Arrow keys and Enter to choose.") | dim | center);
+    if (!errorMessage_.empty()) {
+        body.push_back(text(errorMessage_) | color(Color::Red));
+    }
+    return vbox(std::move(body)) | border | center | size(WIDTH, GREATER_THAN, 60);
+}
+
+Element TuiApp::renderStudyMethodsView() const {
+    Elements body;
+    body.push_back(text("STUDY METHODS") | bold | color(Color::Yellow) | center);
+    body.push_back(separator());
+    body.push_back(text("You won the combat. You may look at the opponent's hand:") | center);
+    body.push_back(text(controller_.getStudyMethodsHandInfo()) | color(Color::Cyan) | center);
+    body.push_back(separator());
+    body.push_back(text("[Press Enter to continue]") | dim | center);
+    return vbox(std::move(body)) | border | center | size(WIDTH, GREATER_THAN, 60);
+}
+
+Element TuiApp::renderConfirmSuspicionNoMatchView() const {
+    Elements body;
+    body.push_back(text("CONFIRM SUSPICION") | bold | color(Color::Yellow) | center);
+    body.push_back(separator());
+    body.push_back(text("Opponent has no matching card. Hand is revealed:") | center);
+    body.push_back(text(controller_.getConfirmSuspicionHandInfo()) | color(Color::Cyan) | center);
+    body.push_back(separator());
+    body.push_back(text("[Press Enter to continue]") | dim | center);
+    return vbox(std::move(body)) | border | center | size(WIDTH, GREATER_THAN, 60);
 }
 
 bool TuiApp::OnEvent(Event event) {
@@ -505,6 +550,37 @@ void TuiApp::handleEnter() {
             startGameFromSetup();
             break;
 
+        case ScreenState::StudyMethodsView:
+        controller_.clearStudyMethodsHandInfo();
+        openGameScreen();
+        break;
+
+        case ScreenState::ConfoundChoice: {
+            if (selected_ == 0) {
+                pendingCardIndexes_.clear();
+                for (int i = 0; i < static_cast<int>(controller_.opponentPlayer().hand().size()); ++i) {
+                    pendingCardIndexes_.push_back(i);
+                }
+                if (pendingCardIndexes_.empty()) {
+                    showError("Opponent has no cards to discard.");
+                    controller_.setConfoundSchemeCardIndex(-1);
+                    openGameScreen();
+                    return;
+                }
+                state_ = ScreenState::DiscardCard;
+                resetSelection();
+            } else {
+                int cardIndex = controller_.getConfoundSchemeCardIndex();
+                Card card = controller_.currentPlayer().removeCardFromHand(cardIndex);
+                controller_.currentPlayer().addToDiscard(std::move(card));
+                controller_.setConfoundSchemeCardIndex(-1);
+                controller_.decrementActions();
+                controller_.endTurnIfNeeded();
+                openGameScreen();
+            }
+            break;
+        }
+
         case ScreenState::Game: {
             auto entries = currentMenuEntries();
             if (entries.empty()) {
@@ -693,7 +769,7 @@ void TuiApp::handleEnter() {
             }
             selectedAttackCardIndex_ = pendingCardIndexes_.at(static_cast<std::size_t>(selected_));
             selectedBeastFormBoostIndexes_.clear();
-            if (controller_.currentPlayer().hand().at(static_cast<std::size_t>(selectedAttackCardIndex_)).getTitle() == "Beast Form") {
+            if (controller_.currentPlayer().hand().at(static_cast<std::size_t>(selectedAttackCardIndex_)).getTitle() == "BEASTFORM") {
                 pendingCardIndexes_.clear();
                 for (int i = 0; i < static_cast<int>(controller_.currentPlayer().hand().size()); ++i) {
                     if (i != selectedAttackCardIndex_) {
@@ -765,7 +841,7 @@ void TuiApp::handleEnter() {
             }
             int defenseIndex = pendingCardIndexes_.at(static_cast<std::size_t>(index));
             const Card& defenseCard = controller_.opponentPlayer().hand().at(defenseIndex);
-            if (defenseCard.getTitle() == "Elementary") {
+            if (defenseCard.getTitle() == "ELEMENTARY") {
                 selectedDefenseCardIndex_ = defenseIndex;
                 pendingValues_.clear();
                 for (int v = 0; v <= 6; ++v) {
@@ -864,6 +940,23 @@ void TuiApp::handleEnter() {
             controller_.currentPlayer().addToDiscard(std::move(played));
             controller_.decrementActions();
             controller_.endTurnIfNeeded();
+            openGameScreen();
+            break;
+        }
+
+        case ScreenState::ConfirmSuspicionNoMatchView:
+            controller_.clearConfirmSuspicionHandInfo();
+            openGameScreen();
+            break;
+
+        case ScreenState::PlaceVanishedInvisibleMan: {
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingSpaces_.size())) {
+                showError("Invalid space selection.");
+                return;
+            }
+            int chosenSpace = pendingSpaces_.at(static_cast<std::size_t>(selected_));
+            controller_.placeVanishedInvisibleMan(chosenSpace);
+            controller_.clearPendingVanishedPlacement();
             openGameScreen();
             break;
         }
@@ -1050,6 +1143,13 @@ std::vector<std::string> TuiApp::currentMenuEntries() const {
         }
         case ScreenState::SchemeChoice: {
             std::vector<std::string> entries;
+            if (waitingForDestination_) {
+                for (int space : pendingSpaces_) {
+                    entries.push_back(spaceMenuLabel(space));
+                }
+                return entries;
+            }
+
             if (!pendingFighterIds_.empty()) {
                 for (const auto& id : pendingFighterIds_) {
                     entries.push_back(fighterMenuLabel(id));
@@ -1080,6 +1180,13 @@ std::vector<std::string> TuiApp::currentMenuEntries() const {
             }
             return entries;
         }
+        case ScreenState::PlaceVanishedInvisibleMan: {
+            std::vector<std::string> entries;
+            for (int space : pendingSpaces_) {
+                entries.push_back(spaceMenuLabel(space));
+            }
+            return entries;
+        }
         case ScreenState::GameOver:
             return {"Back to main menu", "Exit"};
         default:
@@ -1098,6 +1205,12 @@ void TuiApp::showError(const std::string& message) {
 void TuiApp::openGameScreen() {
     if (controller_.gameOver()) {
         state_ = ScreenState::GameOver;
+    } else if (!controller_.getStudyMethodsHandInfo().empty()) {
+        state_ = ScreenState::StudyMethodsView;
+    } else if (!controller_.getConfirmSuspicionHandInfo().empty()) {
+        state_ = ScreenState::ConfirmSuspicionNoMatchView;
+    } else if (controller_.getConfoundSchemeCardIndex() != -1) {
+        state_ = ScreenState::ConfoundChoice;
     } else if (controller_.hasPendingOptionalMovement()) {
         pendingSpaces_ = controller_.pendingOptionalMovementDestinations();
         state_ = ScreenState::OptionalMovementDestination;
@@ -1107,6 +1220,9 @@ void TuiApp::openGameScreen() {
             pendingCardIndexes_.push_back(i);
         }
         state_ = ScreenState::DiscardToLimit;
+    } else if (controller_.hasPendingVanishedPlacement()) {
+        pendingSpaces_ = controller_.getValidPlacementSpacesForVanished();
+        state_ = ScreenState::PlaceVanishedInvisibleMan;
     } else {
         state_ = ScreenState::Game;
     }
@@ -1172,6 +1288,15 @@ void TuiApp::chooseSchemeCard(int selectedMenuIndex) {
     pendingFighterIds_.clear();
     pendingSpaces_.clear();
     pendingValues_.clear();
+
+    const Card& card = controller_.currentPlayer().hand().at(selectedSchemeCardIndex_);
+    
+    if (card.getTitle() == "CONFOUND") {
+        controller_.setConfoundSchemeCardIndex(selectedSchemeCardIndex_);
+        state_ = ScreenState::ConfoundChoice;
+        resetSelection();
+        return;
+    }
 
     SchemeChoiceKind kind = controller_.requiredChoiceForScheme(selectedSchemeCardIndex_);
     if (kind == SchemeChoiceKind::None) {
@@ -1251,14 +1376,25 @@ void TuiApp::completeSchemeChoice() {
         }
         int namedValue = pendingValues_.at(static_cast<std::size_t>(selected_));
         const Card& card = controller_.currentPlayer().hand().at(selectedSchemeCardIndex_);
-        if (card.getTitle() == "Confirm Suspicion") {
+        if (card.getTitle() == "CONFIRM SUSPICION") {
             auto matching = controller_.getMatchingCardIndicesForConfirmSuspicion(namedValue);
             if (matching.empty()) {
+                std::string handInfo = "Opponent hand (no matching card): ";
+                const auto& hand = controller_.opponentPlayer().hand();
+                if (hand.empty()) {
+                    handInfo += "(empty)";
+                } else {
+                    for (size_t i = 0; i < hand.size(); ++i) {
+                        handInfo += hand[i].getTitle();
+                        if (i < hand.size() - 1) handInfo += ", ";
+                    }
+                }
+                controller_.setConfirmSuspicionHandInfo(handInfo);
                 Card played = controller_.currentPlayer().removeCardFromHand(selectedSchemeCardIndex_);
                 controller_.currentPlayer().addToDiscard(std::move(played));
                 controller_.decrementActions();
-                controller_.endTurnIfNeeded();
-                openGameScreen();
+                state_ = ScreenState::ConfirmSuspicionNoMatchView;
+                resetSelection();
                 return;
             } else {
                 selectedNamedValue_ = namedValue;
@@ -1298,7 +1434,7 @@ void TuiApp::completeSchemeChoice() {
     }
     
     if (kind == SchemeChoiceKind::TargetAndDestination) {
-        if (schemeChoice_.targetFighterId.empty()) {
+        if (!waitingForDestination_) {
             if (selected_ < 0 || selected_ >= static_cast<int>(pendingFighterIds_.size())) {
                 showError("Invalid fighter selection.");
                 return;
@@ -1306,6 +1442,7 @@ void TuiApp::completeSchemeChoice() {
             schemeChoice_.targetFighterId = pendingFighterIds_.at(static_cast<std::size_t>(selected_));
             pendingFighterIds_.clear();
             pendingSpaces_ = controller_.destinationChoicesForScheme(selectedSchemeCardIndex_, schemeChoice_);
+            waitingForDestination_ = true;
             resetSelection();
             return;
         }
@@ -1315,8 +1452,8 @@ void TuiApp::completeSchemeChoice() {
         }
         schemeChoice_.destinationSpace = pendingSpaces_.at(static_cast<std::size_t>(selected_));
         controller_.playScheme(selectedSchemeCardIndex_, schemeChoice_);
+        waitingForDestination_ = false;
         openGameScreen();
-        return;
     }
 
     showError("Invalid scheme choice.");

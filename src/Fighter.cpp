@@ -139,7 +139,7 @@ std::vector<Card> Fighter::createDeck() const {
 }
 
 std::vector<std::unique_ptr<Fighter>> Fighter::createSidekicks() const {
-    return {};  
+    return {};
 }
 
 } // namespace unmatched

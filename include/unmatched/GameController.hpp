@@ -120,6 +120,20 @@ public:
         std::uniform_int_distribution<int> dist(min, max);
         return dist(random_);
     }
+    void addAction(int count = 1);
+    void placeVanishedInvisibleMan(int spaceId);
+    std::vector<int> getValidPlacementSpacesForVanished() const;
+    bool hasPendingVanishedPlacement() const { return pendingVanishedPlacement_; }
+    void clearPendingVanishedPlacement() { pendingVanishedPlacement_ = false; }
+    void setPendingVanishedPlacement(bool value) { pendingVanishedPlacement_ = value; }
+    const std::string& getStudyMethodsHandInfo() const { return studyMethodsHandInfo_; }
+    void clearStudyMethodsHandInfo() { studyMethodsHandInfo_.clear(); }
+    void setConfoundSchemeCardIndex(int index) { confoundSchemeCardIndex_ = index; }
+    int getConfoundSchemeCardIndex() const { return confoundSchemeCardIndex_; }
+    void clearConfoundData() { confoundSchemeCardIndex_ = -1; }
+    void setConfirmSuspicionHandInfo(const std::string& info);
+    const std::string& getConfirmSuspicionHandInfo() const { return confirmSuspicionHandInfo_; }
+    void clearConfirmSuspicionHandInfo() { confirmSuspicionHandInfo_.clear(); }
 
 private:
     std::map<std::string, int> remainingMovementPoints_;
@@ -171,6 +185,10 @@ private:
     int pendingMovementPoints_;
     int maxMovementPoints_; 
     std::deque<PendingMovementChoice> pendingOptionalMovements_;
+    bool pendingVanishedPlacement_;
+    std::string studyMethodsHandInfo_;
+    int confoundSchemeCardIndex_ = -1;
+    std::string confirmSuspicionHandInfo_;
     std::map<int, int> computeReachableWithCost(int start, int maxSteps, const std::string& fighterId) const;
 };
 

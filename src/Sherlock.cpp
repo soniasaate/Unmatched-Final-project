@@ -29,7 +29,13 @@ std::string Sherlock::getSpecialAbility() const {
 }
 
 bool Sherlock::canPlayCard(const Card& card) const {
-    return card.getOwner() == Character::Sherlock || card.getOwner() == Character::Any;
+    if (card.getOwner() == Character::Sherlock || card.getOwner() == Character::Any) {
+        return true;
+    }
+    if (card.getOwner() == Character::Watson) {
+        return !getWatson().defeated();
+    }
+    return false;
 }
 
 Fighter& Sherlock::getWatson() {
