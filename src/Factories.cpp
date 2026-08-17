@@ -74,13 +74,24 @@ std::vector<Card> DeckFactory::createDeckForDracula() const {
         }
     };
 
+
+    auto realLivingSisters = [](GameController& controller, Player& owner) {
+        std::vector<Fighter*> result;
+        for (auto& fighter : owner.fighters()) {
+            if (!fighter->isHero() && fighter->cardOwner() == Character::Sister && !fighter->defeated()) {
+                result.push_back(fighter.get());
+            }
+        }
+        (void)controller;
+        return result;
+    };
+
     addCopies(2, "FEEDING FRENZY", Character::Dracula, CardType::Attack, 2, -1, 3, Timing::DuringCombat,
-        [](Fighter& attacker, Fighter& defender, GameController& controller, int& attackValue, int&) {
-            auto* dracula = dynamic_cast<Dracula*>(&attacker);
-            if (!dracula) return;
+        [realLivingSisters](Fighter& cardFighter, Fighter& defender, GameController& controller, int& attackValue, int&) {
+            Player& owner = controller.mutableOwnerOfFighter(cardFighter.id());
             int bonus = 0;
-            for (const auto& sister : dracula->getSisters()) {
-                if (!sister.defeated() && controller.board().shareZone(sister.spaceId(), defender.spaceId())) {
+            for (Fighter* sister : realLivingSisters(controller, owner)) {
+                if (controller.board().shareZone(sister->spaceId(), defender.spaceId())) {
                     ++bonus;
                 }
             }
@@ -91,6 +102,13 @@ std::vector<Card> DeckFactory::createDeckForDracula() const {
         [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
             auto* dracula = dynamic_cast<Dracula*>(&attacker);
             if (!dracula) return;
+            int destination = controller.currentSchemeChoice().destinationSpace;
+            if (destination != -1 && controller.board().contains(destination) &&
+                !controller.isSpaceOccupied(destination)) {
+                dracula->placeAt(destination);
+                controller.addAction(1);
+                return;
+            }
             for (const auto& space : controller.board().spaces()) {
                 if (!controller.isSpaceOccupied(space.id())) {
                     dracula->placeAt(space.id());
@@ -115,18 +133,18 @@ std::vector<Card> DeckFactory::createDeckForDracula() const {
             auto* dracula = dynamic_cast<Dracula*>(&attacker);
             if (!dracula) return;
             dracula->heal(2);
-            for (auto& sister : dracula->getSisters()) {
-                if (sister.defeated()) {
-                    int heroSpace = dracula->spaceId();
-                    for (const auto& space : controller.board().spaces()) {
-                        if (controller.board().shareZone(heroSpace, space.id()) && 
-                            !controller.isSpaceOccupied(space.id())) {
-                            sister.reviveAt(space.id());
-                            break;
-                        }
+            for (auto& fighterPtr : controller.currentPlayer().fighters()) {
+                if (fighterPtr->isHero() || fighterPtr->cardOwner() != Character::Sister) continue;
+                if (!fighterPtr->defeated()) continue;
+                int heroSpace = dracula->spaceId();
+                for (const auto& space : controller.board().spaces()) {
+                    if (controller.board().shareZone(heroSpace, space.id()) &&
+                        !controller.isSpaceOccupied(space.id())) {
+                        fighterPtr->reviveAt(space.id());
+                        break;
                     }
-                    break;
                 }
+                break;
             }
         });
 
@@ -143,8 +161,8 @@ std::vector<Card> DeckFactory::createDeckForDracula() const {
         });
 
     addCopies(3, "EXPLOIT", Character::Any, CardType::Versatile, 4, 4, 1, Timing::AfterCombat,
-        [](Fighter&, Fighter&, GameController& controller, int&, int&) {
-            controller.drawCard(controller.currentPlayer());
+        [](Fighter& cardFighter, Fighter&, GameController& controller, int&, int&) {
+            controller.drawCard(controller.mutableOwnerOfFighter(cardFighter.id()));
         });
 
     addCopies(3, "LOOK INTO MY EYES", Character::Dracula, CardType::Defense, -1, 1, 2, Timing::DuringCombat,
@@ -168,29 +186,24 @@ std::vector<Card> DeckFactory::createDeckForDracula() const {
         });
 
     addCopies(3, "RAVENING SEDUCTION", Character::Sister, CardType::Scheme, -1, -1, 2, Timing::None,
-        [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
-            auto* dracula = dynamic_cast<Dracula*>(&attacker);
-            if (!dracula) return;
-            for (auto& fighter : controller.opponentPlayer().fighters()) {
-                if (!fighter->defeated()) {
-                    int current = fighter->spaceId();
-                    for (int neighbor : controller.board().movementNeighbors(current)) {
-                        if (!controller.isSpaceOccupied(neighbor)) {
-                            fighter->placeAt(neighbor);
-                            int damage = 0;
-                            for (const auto& sister : dracula->getSisters()) {
-                                if (!sister.defeated() &&
-                                    controller.board().areAdjacentForCombat(sister.spaceId(), neighbor)) {
-                                    ++damage;
-                                }
-                            }
-                            if (damage > 0) fighter->damage(damage);
-                            return;
-                        }
-                    }
-                    break;
+        [realLivingSisters](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
+            const SchemeChoice& choice = controller.currentSchemeChoice();
+            if (choice.targetFighterId.empty() || choice.destinationSpace == -1) return;
+
+            Fighter* target = controller.findFighterById(choice.targetFighterId);
+            if (!target || target->defeated()) return;
+            if (controller.isSpaceOccupied(choice.destinationSpace)) return;
+
+            target->placeAt(choice.destinationSpace);
+
+            Player& owner = controller.mutableOwnerOfFighter(attacker.id());
+            int damage = 0;
+            for (Fighter* sister : realLivingSisters(controller, owner)) {
+                if (controller.board().areAdjacentForCombat(sister->spaceId(), choice.destinationSpace)) {
+                    ++damage;
                 }
             }
+            if (damage > 0) target->damage(damage);
         });
 
     addCopies(3, "THIRST FOR SUSTENANCE", Character::Sister, CardType::Attack, 3, -1, 3, Timing::AfterCombat,
@@ -234,17 +247,27 @@ std::vector<Card> DeckFactory::createDeckForSherlock() const {
             if (!sherlock) return;
             Fighter& watson = sherlock->getWatson();
             if (watson.defeated()) return;
-            auto adjacent = controller.board().freeAdjacentSpaces(sherlock->spaceId(), 
-                [&](int spaceId) { return controller.isSpaceOccupied(spaceId); });
-            if (!adjacent.empty()) {
-                watson.placeAt(adjacent.front());
-                sherlock->heal(1);
-                controller.drawCard(controller.currentPlayer());
+
+            int destination = controller.currentSchemeChoice().destinationSpace;
+            bool destinationValid = destination != -1 &&
+                controller.board().areAdjacentForCombat(sherlock->spaceId(), destination) &&
+                !controller.isSpaceOccupied(destination);
+
+            if (!destinationValid) {
+                auto adjacent = controller.board().freeAdjacentSpaces(sherlock->spaceId(),
+                    [&](int spaceId) { return controller.isSpaceOccupied(spaceId); });
+                if (adjacent.empty()) return;
+                destination = adjacent.front();
             }
+
+            watson.placeAt(destination);
+            sherlock->heal(1);
+            controller.drawCard(controller.currentPlayer());
         });
 
     addCopies(3, "CONFIRM SUSPICION", Character::Sherlock, CardType::Scheme, -1, -1, 1, Timing::None,
         [](Fighter&, Fighter&, GameController&, int&, int&) {
+        
         });
 
     addCopies(3, "COUNTERPUNCH", Character::Sherlock, CardType::Versatile, 3, 3, 1, Timing::AfterCombat,
@@ -297,16 +320,25 @@ std::vector<Card> DeckFactory::createDeckForSherlock() const {
         [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
             auto* sherlock = dynamic_cast<Sherlock*>(&attacker);
             if (!sherlock) return;
-            for (auto& fighter : controller.opponentPlayer().fighters()) {
-                if (!fighter->defeated()) {
-                    int sherlockSpace = sherlock->spaceId();
-                    int targetSpace = fighter->spaceId();
-                    sherlock->placeAt(targetSpace);
-                    fighter->placeAt(sherlockSpace);
-                    fighter->damage(1);
-                    break;
+
+            Fighter* target = nullptr;
+            const std::string& chosenId = controller.currentSchemeChoice().targetFighterId;
+            if (!chosenId.empty()) {
+                target = controller.findFighterById(chosenId);
+                if (target && target->defeated()) target = nullptr;
+            }
+            if (!target) {
+                for (auto& fighter : controller.opponentPlayer().fighters()) {
+                    if (!fighter->defeated()) { target = fighter.get(); break; }
                 }
             }
+            if (!target) return;
+
+            int sherlockSpace = sherlock->spaceId();
+            int targetSpace = target->spaceId();
+            sherlock->placeAt(targetSpace);
+            target->placeAt(sherlockSpace);
+            target->damage(1);
         });
 
     addCopies(2, "THE GAME IS AFOOT", Character::Sherlock, CardType::Attack, 5, -1, 2, Timing::AfterCombat,
@@ -344,51 +376,52 @@ std::vector<Card> DeckFactory::createDeckForInvisibleMan() const {
         }
     };
 
+    
     addCopies(2, "CODED NOTES", Character::InvisibleMan, CardType::Defense, -1, 3, 2, Timing::AfterCombat,
-        [](Fighter&, Fighter&, GameController& controller, int&, int&) {
-            controller.drawCard(controller.currentPlayer());
-            controller.drawCard(controller.currentPlayer());
-            controller.drawCard(controller.currentPlayer());
+        [](Fighter& cardFighter, Fighter&, GameController& controller, int&, int&) {
+            Player& owner = controller.mutableOwnerOfFighter(cardFighter.id());
+            controller.drawCard(owner);
+            controller.drawCard(owner);
+            controller.drawCard(owner);
+            controller.queueDeckTopSelection(owner.id(), 2);
         });
 
+    
     addCopies(2, "CONFOUND", Character::InvisibleMan, CardType::Versatile, 3, 3, 2, Timing::AfterCombat,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {
+        [](Fighter& cardFighter, Fighter&, GameController& controller, int&, int&) {
+            const Player* owner = controller.ownerOfFighter(cardFighter.id());
+            if (!owner) return;
+            controller.queueConfoundDecision(owner->id());
         });
-            
+
+    
     addCopies(3, "COVERT PREPARATION", Character::InvisibleMan, CardType::Versatile, 2, 2, 1, Timing::AfterCombat,
-        [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
-            controller.drawCard(controller.currentPlayer());
-            auto* invisible = dynamic_cast<InvisibleMan*>(&attacker);
-            if (!invisible) return;
-            for (int i = 0; i < 3; ++i) {
-                if (invisible->getFogTokens()[i] != -1) {
-                    int current = invisible->getFogTokens()[i];
-                    for (const auto& space : controller.board().spaces()) {
-                        if (space.id() != current && controller.board().areAdjacentForCombat(current, space.id())) {
-                            invisible->moveFogToken(i, space.id());
-                            return;
-                        }
-                    }
-                }
-            }
+        [](Fighter& cardFighter, Fighter&, GameController& controller, int&, int&) {
+            Player& owner = controller.mutableOwnerOfFighter(cardFighter.id());
+            controller.drawCard(owner);
+            auto* invisible = dynamic_cast<InvisibleMan*>(&cardFighter);
+            if (!invisible || invisible->getFogSpaces().empty()) return;
+            controller.queuePendingFogChoice(owner.id(), cardFighter.id(), {}, 2);
         });
 
     addCopies(2, "DREAMING OF REVENGE", Character::InvisibleMan, CardType::Versatile, 3, 3, 1, Timing::AfterCombat,
-        [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
-            auto* invisible = dynamic_cast<InvisibleMan*>(&attacker);
+        [](Fighter& cardFighter, Fighter&, GameController& controller, int&, int&) {
+            auto* invisible = dynamic_cast<InvisibleMan*>(&cardFighter);
             if (!invisible) return;
-            if (!invisible->isOnFog(attacker.spaceId())) return;
-            for (auto& fighter : controller.opponentPlayer().fighters()) {
+            if (!invisible->isOnFog(cardFighter.spaceId())) return;
+        
+            Player& enemy = controller.mutableOpponentOfFighter(cardFighter.id());
+            for (auto& fighter : enemy.fighters()) {
                 if (!fighter->defeated() && invisible->isOnFog(fighter->spaceId())) {
                     fighter->damage(1);
                 }
             }
         });
 
+    
     addCopies(2, "EMERGE FROM MIST", Character::InvisibleMan, CardType::Attack, 3, -1, 2, Timing::DuringCombat,
-        [](Fighter& attacker, Fighter&, GameController&, int& attackValue, int&) {
-            auto* invisible = dynamic_cast<InvisibleMan*>(&attacker);
-            if (invisible && invisible->isOnFog(attacker.spaceId())) {
+        [](Fighter&, Fighter&, GameController& controller, int& attackValue, int&) {
+            if (controller.currentTurnStartedOnFog()) {
                 attackValue = 5;
             }
         });
@@ -399,43 +432,26 @@ std::vector<Card> DeckFactory::createDeckForInvisibleMan() const {
             defenseValue = 0;
         });
 
+
     addCopies(2, "INTO THIN AIR", Character::InvisibleMan, CardType::Defense, -1, 4, 1, Timing::AfterCombat,
-        [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
-            auto* invisible = dynamic_cast<InvisibleMan*>(&attacker);
+        [](Fighter& cardFighter, Fighter&, GameController& controller, int&, int&) {
+            auto* invisible = dynamic_cast<InvisibleMan*>(&cardFighter);
             if (!invisible) return;
-            const Player* owner = controller.ownerOfFighter(attacker.id());
-            if (owner) {
-                controller.queueOptionalMovement(owner->id(), attacker.id(), 1, "INTO THIN AIR");
-            }
-            for (int i = 0; i < 3; ++i) {
-                if (invisible->getFogTokens()[i] != -1) {
-                    int current = invisible->getFogTokens()[i];
-                    for (const auto& space : controller.board().spaces()) {
-                        if (space.id() != current) {
-                            invisible->moveFogToken(i, space.id());
-                            return;
-                        }
-                    }
-                }
+            Player& owner = controller.mutableOwnerOfFighter(cardFighter.id());
+            controller.queueOptionalMovement(owner.id(), cardFighter.id(), 1, "INTO THIN AIR");
+            if (!invisible->getFogSpaces().empty()) {
+                controller.queuePendingFogChoice(owner.id(), cardFighter.id(), {}, 3);
             }
         });
 
+
     addCopies(2, "LURKING", Character::InvisibleMan, CardType::Defense, -1, 2, 2, Timing::AfterCombat,
-        [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
-            controller.drawCard(controller.currentPlayer());
-            auto* invisible = dynamic_cast<InvisibleMan*>(&attacker);
-            if (!invisible) return;
-            for (int i = 0; i < 3; ++i) {
-                if (invisible->getFogTokens()[i] != -1) {
-                    int current = invisible->getFogTokens()[i];
-                    for (const auto& space : controller.board().spaces()) {
-                        if (space.id() != current) {
-                            invisible->moveFogToken(i, space.id());
-                            return;
-                        }
-                    }
-                }
-            }
+        [](Fighter& cardFighter, Fighter&, GameController& controller, int&, int&) {
+            Player& owner = controller.mutableOwnerOfFighter(cardFighter.id());
+            controller.drawCard(owner);
+            auto* invisible = dynamic_cast<InvisibleMan*>(&cardFighter);
+            if (!invisible || invisible->getFogSpaces().empty()) return;
+            controller.queueFogTeleport(owner.id(), cardFighter.id());
         });
 
     addCopies(2, "REIGN OF TERROR", Character::InvisibleMan, CardType::Scheme, -1, -1, 1, Timing::None,
@@ -453,18 +469,11 @@ std::vector<Card> DeckFactory::createDeckForInvisibleMan() const {
     addCopies(2, "ROLLING FOG", Character::InvisibleMan, CardType::Scheme, -1, -1, 1, Timing::None,
         [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
             auto* invisible = dynamic_cast<InvisibleMan*>(&attacker);
-            if (!invisible) return;
-            for (int i = 0; i < 3; ++i) {
-                if (invisible->getFogTokens()[i] != -1) {
-                    int current = invisible->getFogTokens()[i];
-                    for (const auto& space : controller.board().spaces()) {
-                        if (space.id() != current) {
-                            invisible->moveFogToken(i, space.id());
-                            controller.addAction(1);
-                            return;
-                        }
-                    }
-                }
+            if (!invisible || invisible->getFogSpaces().empty()) return;
+            controller.addAction(1);
+            const Player* owner = controller.ownerOfFighter(attacker.id());
+            if (owner) {
+                controller.queuePendingFogChoice(owner->id(), attacker.id(), {}, 999);
             }
         });
 
@@ -485,30 +494,55 @@ std::vector<Card> DeckFactory::createDeckForInvisibleMan() const {
             }
         });
 
+    
     addCopies(2, "STEP LIGHTLY", Character::InvisibleMan, CardType::Scheme, -1, -1, 1, Timing::None,
         [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
             auto* invisible = dynamic_cast<InvisibleMan*>(&attacker);
             if (!invisible) return;
             int damage = invisible->isOnFog(attacker.spaceId()) ? 3 : 1;
             for (auto& fighter : controller.opponentPlayer().fighters()) {
-                if (!fighter->defeated() && 
+                if (!fighter->defeated() &&
                     controller.board().areAdjacentForCombat(attacker.spaceId(), fighter->spaceId())) {
                     fighter->damage(damage);
                     break;
                 }
             }
+            const Player* owner = controller.ownerOfFighter(attacker.id());
+            if (owner && !invisible->getFogSpaces().empty()) {
+                int opponentIdx = (owner->id() == 0) ? 1 : 0;
+                controller.queuePendingFogChoice(opponentIdx, attacker.id(), {}, 2);
+            }
         });
-        
+
+    
     addCopies(2, "VANISH", Character::InvisibleMan, CardType::Scheme, -1, -1, 3, Timing::None,
         [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
             attacker.heal(1);
+            Player& owner = controller.mutableOwnerOfFighter(attacker.id());
             attacker.removeFromBoard();
-            controller.setPendingVanishedPlacement(true);
+            controller.setPendingVanishedPlacement(true, owner.id());
             if (controller.actionsRemaining() == 2) {
-                controller.decrementActions();
-                controller.endTurnIfNeeded();
+                controller.forceEndActionsThisTurn();
             }
         });
+
+    addCopies(2, "DASH", Character::Any, CardType::Versatile, 3, 3, 1, Timing::AfterCombat,
+        [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
+            const Player* owner = controller.ownerOfFighter(attacker.id());
+            if (owner) {
+                controller.queueOptionalMovement(owner->id(), attacker.id(), 3, "DASH");
+            }
+        });
+
+    addCopies(3, "EXPLOIT", Character::Any, CardType::Versatile, 4, 4, 1, Timing::AfterCombat,
+        [](Fighter& cardFighter, Fighter&, GameController& controller, int&, int&) {
+            controller.drawCard(controller.mutableOwnerOfFighter(cardFighter.id()));
+        });
+
+    addCopies(3, "FEINT", Character::Any, CardType::Versatile, 2, 2, 2, Timing::Immediately,
+        [](Fighter&, Fighter&, GameController&, int&, int&) {
+        });
+
     return deck;
 }
 

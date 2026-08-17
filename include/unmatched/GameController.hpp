@@ -37,6 +37,31 @@ struct PendingMovementChoice {
     std::string source;
 };
 
+
+struct PendingDeckTopSelection {
+    int playerIndex = -1;
+    int remaining = 0;
+};
+
+
+struct PendingFogChoice {
+    int chooserPlayerIndex = -1;
+    int invisibleManOwnerIndex = -1;
+    std::string invisibleManFighterId;
+    std::vector<int> excludedTokenIndexes;
+    int maxSteps = 0;
+};
+
+struct PendingFogTeleport {
+    int fighterOwnerPlayerIndex = -1;
+    std::string fighterId;
+};
+
+struct PendingConfoundDecision {
+    int deciderPlayerIndex = -1;
+    int cardOwnerPlayerIndex = -1;
+};
+
 class GameController {
 public:
     GameController();
@@ -60,6 +85,9 @@ public:
     int actionsRemaining() const;
     int turnNumber() const;
     bool draculaAbilityAvailable() const;
+
+    
+    bool currentTurnStartedOnFog() const { return currentTurnStartedOnFog_; }
 
     void drawCardForCurrentPlayer();
     void beginManeuver(int boostHandIndex = -1);
@@ -89,6 +117,7 @@ public:
     std::vector<int> namedValueChoicesForScheme(int handIndex) const;
     std::vector<int> opponentHandChoicesForScheme(int handIndex) const;
     void playScheme(int handIndex, const SchemeChoice& choice);
+    const SchemeChoice& currentSchemeChoice() const { return currentSchemeChoice_; }
 
     std::vector<int> getMatchingCardIndicesForConfirmSuspicion(int namedValue) const;
     void applyConfirmSuspicion(int chosenIndex);
@@ -101,6 +130,7 @@ public:
     std::vector<int> pendingOptionalMovementDestinations() const;
     void resolvePendingOptionalMovement(int destinationSpace = -1);
     void endTurnIfNeeded();
+    void forceEndActionsThisTurn(); 
     bool currentPlayerMustDiscardToLimit() const;
 
     std::map<int, std::string> occupantTokens() const;
@@ -108,10 +138,12 @@ public:
     const Fighter* findFighterById(const std::string& fighterId) const;
     Fighter* findFighterById(const std::string& fighterId);
     const Player* ownerOfFighter(const std::string& fighterId) const;
+    Player& mutableOwnerOfFighter(const std::string& fighterId);
+    Player& mutableOpponentOfFighter(const std::string& fighterId);
     void finishCurrentFighter(const std::string& fighterId);
     int getMovementCost(const std::string& fighterId, int destinationSpace) const;
     int remainingMovementForFighter(const std::string& fighterId) const;
-    void decrementActions() { --actionsRemaining_; }
+    void decrementActions() { if (actionsRemaining_ > 0) --actionsRemaining_; }
 
     bool isSpaceOccupied(int spaceId) const;
     void drawCard(Player& player);
@@ -121,11 +153,18 @@ public:
         return dist(random_);
     }
     void addAction(int count = 1);
+
+    
     void placeVanishedInvisibleMan(int spaceId);
     std::vector<int> getValidPlacementSpacesForVanished() const;
     bool hasPendingVanishedPlacement() const { return pendingVanishedPlacement_; }
-    void clearPendingVanishedPlacement() { pendingVanishedPlacement_ = false; }
-    void setPendingVanishedPlacement(bool value) { pendingVanishedPlacement_ = value; }
+    void clearPendingVanishedPlacement() { pendingVanishedPlacement_ = false; vanishedPlayerIndex_ = -1; }
+    void setPendingVanishedPlacement(bool value, int playerIndex = -1) {
+        pendingVanishedPlacement_ = value;
+        vanishedPlayerIndex_ = value ? playerIndex : -1;
+    }
+    int vanishedPlayerIndex() const { return vanishedPlayerIndex_; }
+
     const std::string& getStudyMethodsHandInfo() const { return studyMethodsHandInfo_; }
     void clearStudyMethodsHandInfo() { studyMethodsHandInfo_.clear(); }
     void setConfoundSchemeCardIndex(int index) { confoundSchemeCardIndex_ = index; }
@@ -134,6 +173,37 @@ public:
     void setConfirmSuspicionHandInfo(const std::string& info);
     const std::string& getConfirmSuspicionHandInfo() const { return confirmSuspicionHandInfo_; }
     void clearConfirmSuspicionHandInfo() { confirmSuspicionHandInfo_.clear(); }
+
+    
+    void queueDeckTopSelection(int playerIndex, int count);
+    bool hasPendingDeckTopSelection() const { return pendingDeckTopSelection_.has_value(); }
+    const PendingDeckTopSelection& pendingDeckTopSelection() const { return *pendingDeckTopSelection_; }
+    void selectCardForDeckTop(int handIndex);
+
+
+    void queuePendingFogChoice(int chooserPlayerIndex, const std::string& invisibleManFighterId,
+                               std::vector<int> excludedTokenIndexes, int maxSteps);
+    bool hasPendingFogChoice() const { return !pendingFogChoices_.empty(); }
+    const PendingFogChoice& pendingFogChoice() const { return pendingFogChoices_.front(); }
+    std::vector<int> fogTokenOptionsForPendingChoice() const;
+    std::vector<int> fogTokenReachableSpaces(const std::string& fighterId, int tokenIndex, int maxSteps) const;
+    void resolvePendingFogChoice(int tokenIndex, int destinationSpace);
+
+    
+    void queueFogTeleport(int ownerPlayerIndex, const std::string& fighterId);
+    bool hasPendingFogTeleport() const { return pendingFogTeleport_.has_value(); }
+    const PendingFogTeleport& pendingFogTeleport() const { return *pendingFogTeleport_; }
+    std::vector<int> fogTeleportDestinations() const;
+    void resolveFogTeleport(int destinationSpace);
+
+
+    void queueConfoundDecision(int cardOwnerPlayerIndex);
+    bool hasPendingConfoundDecision() const { return pendingConfoundDecision_.has_value(); }
+    const PendingConfoundDecision& pendingConfoundDecision() const { return *pendingConfoundDecision_; }
+    void resolveConfoundDecision(bool willDiscard);
+    bool hasPendingConfoundDiscardSelection() const { return pendingConfoundDiscardPlayerIndex_ != -1; }
+    int pendingConfoundDiscardPlayerIndex() const { return pendingConfoundDiscardPlayerIndex_; }
+    void resolveConfoundDiscardSelection(int handIndex);
 
 private:
     std::map<std::string, int> remainingMovementPoints_;
@@ -170,6 +240,7 @@ private:
                                         Fighter& opposingFighter,
                                         bool cardPlayerWon,
                                         int directDamage);
+    void refreshTurnStartFogStatus();
 
     Board board_;
     bool isFighterFinished(const std::string& fighterId) const;
@@ -185,10 +256,20 @@ private:
     int pendingMovementPoints_;
     int maxMovementPoints_; 
     std::deque<PendingMovementChoice> pendingOptionalMovements_;
-    bool pendingVanishedPlacement_;
+    bool pendingVanishedPlacement_ = false;
+    int vanishedPlayerIndex_ = -1;
     std::string studyMethodsHandInfo_;
     int confoundSchemeCardIndex_ = -1;
     std::string confirmSuspicionHandInfo_;
+    SchemeChoice currentSchemeChoice_;
+    bool currentTurnStartedOnFog_ = false;
+
+    std::optional<PendingDeckTopSelection> pendingDeckTopSelection_;
+    std::deque<PendingFogChoice> pendingFogChoices_;
+    std::optional<PendingFogTeleport> pendingFogTeleport_;
+    std::optional<PendingConfoundDecision> pendingConfoundDecision_;
+    int pendingConfoundDiscardPlayerIndex_ = -1;
+
     std::map<int, int> computeReachableWithCost(int start, int maxSteps, const std::string& fighterId) const;
 };
 

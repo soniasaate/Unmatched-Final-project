@@ -47,6 +47,7 @@ std::string characterToString(Character owner) {
         case Character::Sister: return "Sister";
         case Character::Sherlock: return "Sherlock";
         case Character::Watson: return "Watson";
+        case Character::InvisibleMan: return "Invisible Man";
         default: return "Unknown";
     }
 }
