@@ -52,6 +52,7 @@ private:
         StudyMethodsView,
         ConfoundChoice,
         ConfirmSuspicionNoMatchView,
+        LoadGame,
         GameOver,
     };
 
@@ -62,6 +63,7 @@ private:
     ftxui::Element renderStartSelect() const;
     ftxui::Element renderGame() const;
     ftxui::Element renderGameOver() const;
+    ftxui::Element renderLoadGameView() const;
     ftxui::Element renderPlayerPanel(const Player& player, bool active) const;
     ftxui::Element renderHandPanel(const Player& player, bool active) const;
     ftxui::Element renderActionPanel() const;
@@ -122,7 +124,7 @@ private:
     int selectedSchemeCardIndex_;
     std::vector<int> selectedBeastFormBoostIndexes_;
     SchemeChoice schemeChoice_;
-    int confoundCardIndex_ = -1;
+    std::vector<std::pair<int, std::string>> pendingSlots_;
 };
 
 } // namespace unmatched

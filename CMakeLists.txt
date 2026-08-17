@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+add_compile_definitions(_UNICODE UNICODE)
+
 include(FetchContent)
 FetchContent_Declare(
     ftxui
@@ -12,6 +14,13 @@ FetchContent_Declare(
     GIT_TAG v5.0.0
 )
 FetchContent_MakeAvailable(ftxui)
+
+FetchContent_Declare(
+    json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.11.3
+)
+FetchContent_MakeAvailable(json)
 
 add_executable(unmatched_tui
     src/Board.cpp
@@ -27,9 +36,13 @@ add_executable(unmatched_tui
     src/Dracula.cpp     
     src/Sherlock.cpp
     src/InvisibleMan.cpp
+    src/Serialization.cpp
 )
 
-target_include_directories(unmatched_tui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(unmatched_tui PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${json_SOURCE_DIR}/include
+)
 
 target_link_libraries(unmatched_tui PRIVATE ftxui::screen ftxui::dom ftxui::component)
 

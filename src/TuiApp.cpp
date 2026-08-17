@@ -47,7 +47,6 @@ std::string characterToString(Character owner) {
         case Character::Sister: return "Sister";
         case Character::Sherlock: return "Sherlock";
         case Character::Watson: return "Watson";
-        case Character::InvisibleMan: return "Invisible Man";
         default: return "Unknown";
     }
 }
@@ -98,6 +97,8 @@ Element TuiApp::Render() {
             return renderMainMenu();
         case ScreenState::Help:
             return renderHelp();
+        case ScreenState::LoadGame:
+            return renderLoadGameView();
         case ScreenState::SetupAge:
             return renderSetupAge();
         case ScreenState::FighterSelect:
@@ -115,6 +116,22 @@ Element TuiApp::Render() {
         default:
             return renderGame();
     }
+}
+
+Element TuiApp::renderLoadGameView() const {
+    Elements body;
+    body.push_back(text("Load Game") | bold | color(Color::Yellow) | center);
+    body.push_back(separator());
+    if (pendingSlots_.empty()) {
+        body.push_back(text("No save files available.") | color(Color::Red) | center);
+    } else {
+        for (size_t i = 0; i < pendingSlots_.size(); ++i) {
+            body.push_back(menuLine(pendingSlots_[i].second, static_cast<int>(i) == selected_));
+        }
+    }
+    body.push_back(separator());
+    body.push_back(menuLine("Back", selected_ == static_cast<int>(pendingSlots_.size())));
+    return vbox(std::move(body)) | border | center | size(WIDTH, GREATER_THAN, 60);
 }
 
 Element TuiApp::renderConfoundChoiceView() const {
@@ -157,6 +174,29 @@ Element TuiApp::renderConfirmSuspicionNoMatchView() const {
 
 bool TuiApp::OnEvent(Event event) {
     try {
+        if (event == Event::Character("s") || event == Event::Character("S")) {
+            if (controller_.started() && !controller_.gameOver()) {
+                controller_.saveGame();
+                showError("Game saved successfully!");
+                return true;
+            }
+            return true;
+        }
+        if (event == Event::Character("l") || event == Event::Character("L")) {
+            if (!controller_.started() || controller_.gameOver()) {
+                auto slots = controller_.getSaveSlots();
+                if (!slots.empty()) {
+                    pendingSlots_ = slots;
+                    state_ = ScreenState::LoadGame;
+                    resetSelection();
+                    return true;
+                }
+                showError("No save files found.");
+                return true;
+            }
+            return true;
+        }
+
         return handleEvent(event);
     } catch (const GameException& exception) {
         showError(exception.what());
@@ -484,6 +524,15 @@ void TuiApp::handleEnter() {
                 playerTwoAge_ = 0;
                 state_ = ScreenState::SetupAge;
             } else if (selected_ == 1) {
+                auto slots = controller_.getSaveSlots();
+                if (slots.empty()) {
+                    showError("No save files found.");
+                    return;
+                }
+                pendingSlots_ = slots;
+                state_ = ScreenState::LoadGame;
+                resetSelection();
+            } else if (selected_ == 2) {
                 state_ = ScreenState::Help;
             } else {
                 screen_.ExitLoopClosure()();
@@ -493,6 +542,22 @@ void TuiApp::handleEnter() {
 
         case ScreenState::Help:
             state_ = controller_.started() ? ScreenState::Game : ScreenState::MainMenu;
+            resetSelection();
+            break;
+
+        case ScreenState::LoadGame:
+            if (selected_ < static_cast<int>(pendingSlots_.size())) {
+                int slot = pendingSlots_[selected_].first;
+                try {
+                    controller_.loadGame(slot);
+                    state_ = ScreenState::Game;
+                } catch (const std::exception& e) {
+                    showError(std::string("Failed to load: ") + e.what());
+                    state_ = ScreenState::MainMenu;
+                }
+            } else {
+                state_ = ScreenState::MainMenu;
+            }
             resetSelection();
             break;
 
@@ -629,7 +694,11 @@ void TuiApp::handleEnter() {
                 resetSelection();
             } else if (choice == "Drawing Card") {
                 showError("In legal play, drawing is performed through Maneuver or card effects.");
-            } else if (choice == "Help") {
+            }else if (choice == "Save Game") {
+                controller_.saveGame();
+                showError("Game saved successfully!");
+                openGameScreen();
+            }else if (choice == "Help") {
                 state_ = ScreenState::Help;
                 resetSelection();
             } else if (choice == "Back to main menu") {
@@ -1002,7 +1071,7 @@ void TuiApp::moveSelection(int delta) {
 std::vector<std::string> TuiApp::currentMenuEntries() const {
     switch (state_) {
         case ScreenState::MainMenu:
-            return {"Play", "Help", "Exit"};
+            return {"Play", "Load Game", "Help", "Exit"};
         case ScreenState::Help:
             return {controller_.started() ? "Back to game" : "Back to main menu"};
         case ScreenState::FighterSelect:
@@ -1032,6 +1101,7 @@ std::vector<std::string> TuiApp::currentMenuEntries() const {
             entries.push_back("Scheme");
             entries.push_back("Discarding Cards");
             entries.push_back("Drawing Card");
+            entries.push_back("Save Game");
             entries.push_back("Help");
             entries.push_back("Back to main menu");
             return entries;
