@@ -76,11 +76,12 @@ std::vector<Card> DeckFactory::createDeckForDracula() const {
 
     addCopies(2, "FEEDING FRENZY", Character::Dracula, CardType::Attack, 2, -1, 3, Timing::DuringCombat,
         [](Fighter& attacker, Fighter& defender, GameController& controller, int& attackValue, int&) {
-            auto* dracula = dynamic_cast<Dracula*>(&attacker);
-            if (!dracula) return;
+            const Player* owner = controller.ownerOfFighter(attacker.id());
+            if (!owner) return;
             int bonus = 0;
-            for (const auto& sister : dracula->getSisters()) {
-                if (!sister.defeated() && controller.board().shareZone(sister.spaceId(), defender.spaceId())) {
+            for (const auto& fighter : owner->fighters()) {
+                if (!fighter->defeated() && fighter->cardOwner() == Character::Sister &&
+                    controller.board().shareZone(fighter->spaceId(), defender.spaceId())) {
                     ++bonus;
                 }
             }
@@ -115,17 +116,15 @@ std::vector<Card> DeckFactory::createDeckForDracula() const {
             auto* dracula = dynamic_cast<Dracula*>(&attacker);
             if (!dracula) return;
             dracula->heal(2);
-            for (auto& sister : dracula->getSisters()) {
-                if (sister.defeated()) {
-                    int heroSpace = dracula->spaceId();
-                    for (const auto& space : controller.board().spaces()) {
-                        if (controller.board().shareZone(heroSpace, space.id()) && 
-                            !controller.isSpaceOccupied(space.id())) {
-                            sister.reviveAt(space.id());
-                            break;
-                        }
+            const Player* owner = controller.ownerOfFighter(attacker.id());
+            if (!owner) return;
+            for (auto& fighter : owner->fighters()) {
+                if (fighter->cardOwner() == Character::Sister && fighter->defeated()) {
+                    std::vector<int> freeSpaces = controller.freeSpacesSharingHeroZone(*owner);
+                    if (!freeSpaces.empty()) {
+                        fighter->reviveAt(freeSpaces.front());
+                        break;
                     }
-                    break;
                 }
             }
         });
@@ -148,8 +147,7 @@ std::vector<Card> DeckFactory::createDeckForDracula() const {
         });
 
     addCopies(3, "LOOK INTO MY EYES", Character::Dracula, CardType::Defense, -1, 1, 2, Timing::DuringCombat,
-        [](Fighter&, Fighter&, GameController&, int&, int& defenseValue) {
-            defenseValue += 2;
+        [](Fighter&, Fighter&, GameController&, int&, int&) {
         });
 
     addCopies(2, "PREY UPON", Character::Dracula, CardType::Scheme, -1, -1, 4, Timing::None,
@@ -169,8 +167,8 @@ std::vector<Card> DeckFactory::createDeckForDracula() const {
 
     addCopies(3, "RAVENING SEDUCTION", Character::Sister, CardType::Scheme, -1, -1, 2, Timing::None,
         [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
-            auto* dracula = dynamic_cast<Dracula*>(&attacker);
-            if (!dracula) return;
+            const Player* owner = controller.ownerOfFighter(attacker.id());
+            if (!owner) return;
             for (auto& fighter : controller.opponentPlayer().fighters()) {
                 if (!fighter->defeated()) {
                     int current = fighter->spaceId();
@@ -178,9 +176,9 @@ std::vector<Card> DeckFactory::createDeckForDracula() const {
                         if (!controller.isSpaceOccupied(neighbor)) {
                             fighter->placeAt(neighbor);
                             int damage = 0;
-                            for (const auto& sister : dracula->getSisters()) {
-                                if (!sister.defeated() &&
-                                    controller.board().areAdjacentForCombat(sister.spaceId(), neighbor)) {
+                            for (const auto& sister : owner->fighters()) {
+                                if (!sister->defeated() && sister->cardOwner() == Character::Sister &&
+                                    controller.board().areAdjacentForCombat(sister->spaceId(), neighbor)) {
                                     ++damage;
                                 }
                             }
@@ -345,10 +343,7 @@ std::vector<Card> DeckFactory::createDeckForInvisibleMan() const {
     };
 
     addCopies(2, "CODED NOTES", Character::InvisibleMan, CardType::Defense, -1, 3, 2, Timing::AfterCombat,
-        [](Fighter&, Fighter&, GameController& controller, int&, int&) {
-            controller.drawCard(controller.currentPlayer());
-            controller.drawCard(controller.currentPlayer());
-            controller.drawCard(controller.currentPlayer());
+        [](Fighter&, Fighter&, GameController&, int&, int&) {
         });
 
     addCopies(2, "CONFOUND", Character::InvisibleMan, CardType::Versatile, 3, 3, 2, Timing::AfterCombat,
@@ -363,11 +358,19 @@ std::vector<Card> DeckFactory::createDeckForInvisibleMan() const {
             for (int i = 0; i < 3; ++i) {
                 if (invisible->getFogTokens()[i] != -1) {
                     int current = invisible->getFogTokens()[i];
-                    for (const auto& space : controller.board().spaces()) {
-                        if (space.id() != current && controller.board().areAdjacentForCombat(current, space.id())) {
-                            invisible->moveFogToken(i, space.id());
-                            return;
+                    auto occupiedByEnemy = [&](int spaceId) {
+                        for (const auto& fighter : controller.opponentPlayer().fighters()) {
+                            if (!fighter->defeated() && fighter->spaceId() == spaceId) return true;
                         }
+                        return false;
+                    };
+                    auto occupiedByAny = [&](int spaceId) {
+                        return controller.isSpaceOccupied(spaceId);
+                    };
+                    auto reachable = controller.board().reachableSpaces(current, 2, occupiedByEnemy, occupiedByAny);
+                    if (!reachable.empty()) {
+                        invisible->moveFogToken(i, reachable.front());
+                        return;
                     }
                 }
             }
@@ -399,7 +402,7 @@ std::vector<Card> DeckFactory::createDeckForInvisibleMan() const {
             defenseValue = 0;
         });
 
-    addCopies(2, "INTO THIN AIR", Character::InvisibleMan, CardType::Defense, -1, 4, 1, Timing::AfterCombat,
+   addCopies(2, "INTO THIN AIR", Character::InvisibleMan, CardType::Defense, -1, 4, 1, Timing::AfterCombat,
         [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
             auto* invisible = dynamic_cast<InvisibleMan*>(&attacker);
             if (!invisible) return;
@@ -410,11 +413,19 @@ std::vector<Card> DeckFactory::createDeckForInvisibleMan() const {
             for (int i = 0; i < 3; ++i) {
                 if (invisible->getFogTokens()[i] != -1) {
                     int current = invisible->getFogTokens()[i];
-                    for (const auto& space : controller.board().spaces()) {
-                        if (space.id() != current) {
-                            invisible->moveFogToken(i, space.id());
-                            return;
+                    auto occupiedByEnemy = [&](int spaceId) {
+                        for (const auto& fighter : controller.opponentPlayer().fighters()) {
+                            if (!fighter->defeated() && fighter->spaceId() == spaceId) return true;
                         }
+                        return false;
+                    };
+                    auto occupiedByAny = [&](int spaceId) {
+                        return controller.isSpaceOccupied(spaceId);
+                    };
+                    auto reachable = controller.board().reachableSpaces(current, 3, occupiedByEnemy, occupiedByAny);
+                    if (!reachable.empty()) {
+                        invisible->moveFogToken(i, reachable.front());
+                        return;
                     }
                 }
             }

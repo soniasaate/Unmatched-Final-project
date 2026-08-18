@@ -12,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <set>
 
 namespace unmatched {
 
@@ -43,7 +44,7 @@ private:
         DefenseElementaryPrediction,
         SchemeCard,
         SchemeChoice,
-        ConfirmSuspicionChoice, 
+        ConfirmSuspicionChoice,
         DiscardCard,
         DiscardToLimit,
         DraculaAbilityTarget,
@@ -52,6 +53,7 @@ private:
         StudyMethodsView,
         ConfoundChoice,
         ConfirmSuspicionNoMatchView,
+        CodedNotesSelect,
         LoadGame,
         GameOver,
     };
@@ -71,6 +73,7 @@ private:
     ftxui::Element renderStudyMethodsView() const;
     ftxui::Element renderConfoundChoiceView() const;
     ftxui::Element renderConfirmSuspicionNoMatchView() const;
+    ftxui::Element renderCodedNotesView() const;
     ftxui::Element renderMenuLines(const std::vector<std::string>& entries, const std::string& title) const;
 
     bool handleEvent(ftxui::Event event);
@@ -111,6 +114,8 @@ private:
     std::string errorMessage_;
     bool asciiOnlyMode_;
     bool waitingForDestination_;
+    std::set<size_t> selectedCodedNotesIndices_;
+    int codedNotesCardIndex_ = -1;
 
     std::vector<std::string> pendingFighterIds_;
     std::vector<int> pendingCardIndexes_;

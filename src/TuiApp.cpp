@@ -47,6 +47,7 @@ std::string characterToString(Character owner) {
         case Character::Sister: return "Sister";
         case Character::Sherlock: return "Sherlock";
         case Character::Watson: return "Watson";
+        case Character::InvisibleMan: return "Invisible Man";
         default: return "Unknown";
     }
 }
@@ -111,6 +112,8 @@ Element TuiApp::Render() {
             return renderStudyMethodsView();
         case ScreenState::ConfoundChoice:
             return renderConfoundChoiceView();
+        case ScreenState::CodedNotesSelect:
+            return renderCodedNotesView();
         case ScreenState::ConfirmSuspicionNoMatchView:
             return renderConfirmSuspicionNoMatchView();
         default:
@@ -122,16 +125,17 @@ Element TuiApp::renderLoadGameView() const {
     Elements body;
     body.push_back(text("Load Game") | bold | color(Color::Yellow) | center);
     body.push_back(separator());
-    if (pendingSlots_.empty()) {
+    
+    auto entries = currentMenuEntries();
+    if (entries.empty()) {
         body.push_back(text("No save files available.") | color(Color::Red) | center);
     } else {
-        for (size_t i = 0; i < pendingSlots_.size(); ++i) {
-            body.push_back(menuLine(pendingSlots_[i].second, static_cast<int>(i) == selected_));
+        for (size_t i = 0; i < entries.size(); ++i) {
+            body.push_back(menuLine(entries[i], static_cast<int>(i) == selected_));
         }
     }
-    body.push_back(separator());
-    body.push_back(menuLine("Back", selected_ == static_cast<int>(pendingSlots_.size())));
-    return vbox(std::move(body)) | border | center | size(WIDTH, GREATER_THAN, 60);
+    
+    return vbox(std::move(body)) | border | size(WIDTH, GREATER_THAN, 72) | center;
 }
 
 Element TuiApp::renderConfoundChoiceView() const {
@@ -169,6 +173,33 @@ Element TuiApp::renderConfirmSuspicionNoMatchView() const {
     body.push_back(text(controller_.getConfirmSuspicionHandInfo()) | color(Color::Cyan) | center);
     body.push_back(separator());
     body.push_back(text("[Press Enter to continue]") | dim | center);
+    return vbox(std::move(body)) | border | center | size(WIDTH, GREATER_THAN, 60);
+}
+
+Element TuiApp::renderCodedNotesView() const {
+    Elements body;
+    body.push_back(text("CODED NOTES") | bold | color(Color::Yellow) | center);
+    body.push_back(separator());
+    body.push_back(text("Draw 3 cards, then select 2 cards to put on top of your deck.") | center);
+    body.push_back(text("Select 2 cards from your hand (use Arrow keys and Enter):") | center);
+    body.push_back(separator());
+    
+    const auto& hand = controller_.currentPlayer().hand();
+    if (hand.empty()) {
+        body.push_back(text("(no cards in hand)") | color(Color::Red) | center);
+    } else {
+        for (size_t i = 0; i < hand.size(); ++i) {
+            bool isSelected = (selectedCodedNotesIndices_.count(i) > 0);
+            std::string prefix = isSelected ? "[X] " : "[ ] ";
+            body.push_back(menuLine(prefix + hand[i].getTitle(), static_cast<int>(i) == selected_));
+        }
+    }
+    
+    body.push_back(separator());
+    std::string confirmLabel = "Confirm selection (" + std::to_string(selectedCodedNotesIndices_.size()) + "/2 selected)";
+    body.push_back(menuLine(confirmLabel, selected_ == static_cast<int>(hand.size())));
+    body.push_back(menuLine("Cancel", selected_ == static_cast<int>(hand.size()) + 1));
+    
     return vbox(std::move(body)) | border | center | size(WIDTH, GREATER_THAN, 60);
 }
 
@@ -343,7 +374,6 @@ Element TuiApp::renderPlayerPanel(const Player& player, bool active) const {
         rows.push_back(fighterLine(*fighter));
     }
     
-    // ===== نمایش توکن‌های مه =====
     if (auto* invisible = dynamic_cast<const InvisibleMan*>(&hero)) {
         std::string fogInfo = "Fog Tokens: ";
         bool first = true;
@@ -545,7 +575,7 @@ void TuiApp::handleEnter() {
             resetSelection();
             break;
 
-        case ScreenState::LoadGame:
+        case ScreenState::LoadGame: {
             if (selected_ < static_cast<int>(pendingSlots_.size())) {
                 int slot = pendingSlots_[selected_].first;
                 try {
@@ -560,6 +590,7 @@ void TuiApp::handleEnter() {
             }
             resetSelection();
             break;
+        }
 
         case ScreenState::SetupAge: {
             if (ageInput_.empty()) {
@@ -643,6 +674,41 @@ void TuiApp::handleEnter() {
                 controller_.decrementActions();
                 controller_.endTurnIfNeeded();
                 openGameScreen();
+            }
+            break;
+        }
+
+        case ScreenState::CodedNotesSelect: {
+            const auto& hand = controller_.currentPlayer().hand();
+            size_t handSize = hand.size();
+            if (selected_ == static_cast<int>(handSize)) {
+                if (selectedCodedNotesIndices_.size() != 2) {
+                    showError("Please select exactly 2 cards.");
+                    return;
+                }
+                std::vector<int> indices(selectedCodedNotesIndices_.begin(), selectedCodedNotesIndices_.end());
+                controller_.handleCodedNotes(codedNotesCardIndex_, indices);
+                selectedCodedNotesIndices_.clear();
+                codedNotesCardIndex_ = -1;
+                openGameScreen();
+            } else if (selected_ == static_cast<int>(handSize) + 1) {
+                Card played = controller_.currentPlayer().removeCardFromHand(codedNotesCardIndex_);
+                controller_.currentPlayer().addToDiscard(std::move(played));
+                controller_.decrementActions();
+                selectedCodedNotesIndices_.clear();
+                codedNotesCardIndex_ = -1;
+                openGameScreen();
+            } else if (selected_ >= 0 && selected_ < static_cast<int>(handSize)) {
+                size_t idx = static_cast<size_t>(selected_);
+                if (selectedCodedNotesIndices_.count(idx)) {
+                    selectedCodedNotesIndices_.erase(idx);
+                } else {
+                    if (selectedCodedNotesIndices_.size() < 2) {
+                        selectedCodedNotesIndices_.insert(idx);
+                    } else {
+                        showError("You can only select 2 cards.");
+                    }
+                }
             }
             break;
         }
@@ -1019,17 +1085,17 @@ void TuiApp::handleEnter() {
             openGameScreen();
             break;
 
-        case ScreenState::PlaceVanishedInvisibleMan: {
+       case ScreenState::PlaceVanishedInvisibleMan: {
             if (selected_ < 0 || selected_ >= static_cast<int>(pendingSpaces_.size())) {
                 showError("Invalid space selection.");
                 return;
             }
             int chosenSpace = pendingSpaces_.at(static_cast<std::size_t>(selected_));
-            controller_.placeVanishedInvisibleMan(chosenSpace);
+            controller_.handleVanish(selectedSchemeCardIndex_, chosenSpace);
             controller_.clearPendingVanishedPlacement();
             openGameScreen();
             break;
-        }
+}
 
         case ScreenState::GameOver:
             if (selected_ == 0) {
@@ -1106,6 +1172,16 @@ std::vector<std::string> TuiApp::currentMenuEntries() const {
             entries.push_back("Back to main menu");
             return entries;
         }
+    
+        case ScreenState::LoadGame: {
+            std::vector<std::string> entries;
+            for (const auto& slot : pendingSlots_) {
+                entries.push_back(slot.second);
+            }
+            entries.push_back("Back");
+            return entries;
+        }
+
         case ScreenState::ManeuverBoost: {
             std::vector<std::string> entries{"No boost"};
             for (int index : pendingCardIndexes_) {
@@ -1361,10 +1437,18 @@ void TuiApp::chooseSchemeCard(int selectedMenuIndex) {
     pendingValues_.clear();
 
     const Card& card = controller_.currentPlayer().hand().at(selectedSchemeCardIndex_);
-    
+
     if (card.getTitle() == "CONFOUND") {
         controller_.setConfoundSchemeCardIndex(selectedSchemeCardIndex_);
         state_ = ScreenState::ConfoundChoice;
+        resetSelection();
+        return;
+    }
+    
+    if (card.getTitle() == "CODED NOTES") {
+        codedNotesCardIndex_ = selectedSchemeCardIndex_;
+        selectedCodedNotesIndices_.clear();
+        state_ = ScreenState::CodedNotesSelect;
         resetSelection();
         return;
     }
@@ -1450,22 +1534,8 @@ void TuiApp::completeSchemeChoice() {
         if (card.getTitle() == "CONFIRM SUSPICION") {
             auto matching = controller_.getMatchingCardIndicesForConfirmSuspicion(namedValue);
             if (matching.empty()) {
-                std::string handInfo = "Opponent hand (no matching card): ";
-                const auto& hand = controller_.opponentPlayer().hand();
-                if (hand.empty()) {
-                    handInfo += "(empty)";
-                } else {
-                    for (size_t i = 0; i < hand.size(); ++i) {
-                        handInfo += hand[i].getTitle();
-                        if (i < hand.size() - 1) handInfo += ", ";
-                    }
-                }
-                controller_.setConfirmSuspicionHandInfo(handInfo);
-                Card played = controller_.currentPlayer().removeCardFromHand(selectedSchemeCardIndex_);
-                controller_.currentPlayer().addToDiscard(std::move(played));
-                controller_.decrementActions();
-                state_ = ScreenState::ConfirmSuspicionNoMatchView;
-                resetSelection();
+                controller_.playConfirmSuspicion(selectedSchemeCardIndex_, namedValue);
+                openGameScreen();
                 return;
             } else {
                 selectedNamedValue_ = namedValue;

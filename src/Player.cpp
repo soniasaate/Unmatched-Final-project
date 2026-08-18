@@ -19,10 +19,6 @@ int Player::age() const {
     return age_;
 }
 
-/*HeroKind Player::hero() const {
-    return hero_;
-}*/
-
 std::vector<std::unique_ptr<Fighter>>& Player::fighters() {
     return fighters_;
 }

@@ -449,21 +449,17 @@ void GameController::resolveAttack(const std::string& attackerId,
         attackEffectsCanceled = true;
     }
 
-    if (!attackEffectsCanceled && attackCard.getTitle() == "AMBUSH" && !defenderPlayer.hand().empty()) {
-        std::uniform_int_distribution<int> distribution(0, static_cast<int>(defenderPlayer.hand().size()) - 1);
-        int discardedIndex = distribution(random_);
-        Card discarded = defenderPlayer.removeCardFromHand(discardedIndex);
-        attackValue += discarded.getBoost();
-        defenderPlayer.addToDiscard(std::move(discarded));
+    if (defenseCard.has_value() && defenseCard->getTitle() == "LOOK INTO MY EYES") {
+        defenseValue += std::max(0, attackCard.getBoost());
+    }
+
+    attackCard.applyEffect(attacker, defender, *this, attackValue, defenseValue);
+
+    if (defenseCard.has_value()) {
+        defenseCard->applyEffect(defender, attacker, *this, defenseValue, attackValue);
     }
 
     if (defenseCard.has_value() && !defenseEffectsCanceled) {
-        if (defenseCard->getTitle() == "LOOK INTO MY EYES") {
-            defenseValue += std::max(0, attackCard.getBoost());
-        }
-        if (defenseCard->getTitle() == "DEDUCE STRATEGY") {
-            attackValue = std::max(0, attackCard.getBoost());
-        }
         if (defenseCard->getTitle() == "ELEMENTARY") {
             if (!cardEffectsProtectedBySherlock(attackCard, attackerPlayer)) {
                 if (predictedElementaryValue != -1 && attackCard.getAttack() == predictedElementaryValue) {
@@ -471,19 +467,6 @@ void GameController::resolveAttack(const std::string& attackerId,
                     attackEffectsCanceled = true;
                 }
             }
-        }
-    }
-
-    if (!attackEffectsCanceled) {
-        if (attackCard.getTitle() == "FEEDING FRENZY") {
-            int bonus = countLivingSistersInZoneWith(defender.spaceId());
-            attackValue += bonus;
-        }
-        if (attackCard.getTitle() == "DEDUCE STRATEGY" && defenseCard.has_value()) {
-            defenseValue = std::max(0, defenseCard->getBoost());
-        }
-        if (attackCard.getTitle() == "BEASTFORM") {
-            attackValue += beastFormBonus;
         }
     }
 
@@ -644,7 +627,7 @@ std::vector<int> GameController::opponentHandChoicesForScheme(int handIndex) con
     return result;
 }
 
-void GameController::playScheme(int handIndex, const SchemeChoice&) {
+void GameController::playScheme(int handIndex, const SchemeChoice& choice) {
     if (actionsRemaining_ <= 0) {
         throw RuleViolation("No actions remain this turn.");
     }
@@ -666,14 +649,37 @@ void GameController::playScheme(int handIndex, const SchemeChoice&) {
     int dummyDefense = 0;
     card.applyEffect(player.heroFighter(), opponent.heroFighter(), *this, dummyAttack, dummyDefense);
 
-    player.addToDiscard(std::move(card));
+    if (card.getTitle() == "MISTFORM") {
+        if (choice.destinationSpace != -1 && board_.contains(choice.destinationSpace) &&
+            !isSpaceOccupied(choice.destinationSpace)) {
+            auto* dracula = dynamic_cast<Dracula*>(&player.heroFighter());
+            if (dracula) {
+                dracula->placeAt(choice.destinationSpace);
+                addAction(1);
+            }
+        }
+    }
 
+    if (card.getTitle() == "ADMINISTER AID") {
+        auto* sherlock = dynamic_cast<Sherlock*>(&player.heroFighter());
+        if (sherlock) {
+            Fighter& watson = sherlock->getWatson();
+            if (!watson.defeated() && choice.destinationSpace != -1 && board_.contains(choice.destinationSpace) &&
+                !isSpaceOccupied(choice.destinationSpace) &&
+                board_.areAdjacentForCombat(sherlock->spaceId(), choice.destinationSpace)) {
+                watson.placeAt(choice.destinationSpace);
+                sherlock->heal(1);
+                drawCard(player);
+            }
+        }
+    }
+
+    player.addToDiscard(std::move(card));
     checkDefeatedFighters();
     checkWinner();
     --actionsRemaining_;
     endTurnIfNeeded();
 }
-
 std::vector<int> GameController::legalBoostCardIndexes() const {
     std::vector<int> result(currentPlayer().hand().size());
     std::iota(result.begin(), result.end(), 0);
@@ -885,6 +891,9 @@ const Player& GameController::opponentOf(const Player& player) const {
 bool GameController::isCardPlayableBy(const Card& card, const Fighter& fighter) const {
     if (fighter.defeated()) {
         return false;
+    }
+    if (card.getOwner() == Character::Sister && dynamic_cast<const Dracula*>(&fighter)) {
+        return hasLivingSisterForDracula(fighter);
     }
     return fighter.canPlayCard(card);
 }
@@ -1453,6 +1462,193 @@ std::vector<std::pair<int, std::string>> GameController::getSaveSlots() const {
         }
     }
     return result;
+}
+
+bool GameController::hasLivingSisterForDracula(const Fighter& dracula) const {
+    const Player* owner = ownerOfFighter(dracula.id());
+    if (!owner) return false;
+    for (const auto& fighter : owner->fighters()) {
+        if (!fighter->defeated() && fighter->cardOwner() == Character::Sister) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void GameController::handleConfound(int handIndex, bool opponentDiscards) {
+    Card card = currentPlayer().removeCardFromHand(handIndex);
+    if (opponentDiscards) {
+        if (!opponentPlayer().hand().empty()) {
+            int idx = getRandomInt(0, static_cast<int>(opponentPlayer().hand().size()) - 1);
+            Card discarded = opponentPlayer().removeCardFromHand(idx);
+            opponentPlayer().addToDiscard(std::move(discarded));
+        }
+    } else {
+        auto* invisible = dynamic_cast<InvisibleMan*>(&currentPlayer().heroFighter());
+        if (invisible) {
+            for (int i = 0; i < 3; ++i) {
+                if (invisible->getFogTokens()[i] != -1) {
+                    int current = invisible->getFogTokens()[i];
+                    auto occupiedByEnemy = [&](int spaceId) {
+                        for (const auto& fighter : opponentPlayer().fighters()) {
+                            if (!fighter->defeated() && fighter->spaceId() == spaceId) return true;
+                        }
+                        return false;
+                    };
+                    auto occupiedByAny = [&](int spaceId) {
+                        return isSpaceOccupied(spaceId);
+                    };
+                    auto reachable = board_.reachableSpaces(current, 99, occupiedByEnemy, occupiedByAny);
+                    if (!reachable.empty()) {
+                        invisible->moveFogToken(i, reachable.front());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    currentPlayer().addToDiscard(std::move(card));
+    --actionsRemaining_;
+    endTurnIfNeeded();
+}
+
+void GameController::handleVanish(int handIndex, int destinationSpace) {
+    (void)destinationSpace;
+    Card card = currentPlayer().removeCardFromHand(handIndex);
+    Fighter& hero = currentPlayer().heroFighter();
+    hero.heal(1);
+    hero.removeFromBoard();
+    pendingVanishedPlacement_ = true;
+    currentPlayer().addToDiscard(std::move(card));
+    --actionsRemaining_;
+    endTurnIfNeeded();
+}
+
+void GameController::handleStepLightly(int handIndex, const std::string& targetFighterId) {
+    Card card = currentPlayer().removeCardFromHand(handIndex);
+    auto* invisible = dynamic_cast<InvisibleMan*>(&currentPlayer().heroFighter());
+    if (invisible) {
+        int damage = invisible->isOnFog(invisible->spaceId()) ? 3 : 1;
+        Fighter* target = findFighterById(targetFighterId);
+        if (target && !target->defeated()) {
+            target->damage(damage);
+        }
+    }
+    currentPlayer().addToDiscard(std::move(card));
+    --actionsRemaining_;
+    endTurnIfNeeded();
+}
+
+void GameController::handleLurking(int handIndex, int choice) {
+    Card card = currentPlayer().removeCardFromHand(handIndex);
+    drawCard(currentPlayer());
+    auto* invisible = dynamic_cast<InvisibleMan*>(&currentPlayer().heroFighter());
+    if (invisible) {
+        if (choice == 0) {
+            for (int fog : invisible->getFogTokens()) {
+                if (fog != -1 && !isSpaceOccupied(fog)) {
+                    invisible->placeAt(fog);
+                    break;
+                }
+            }
+        } else if (choice == 1) {
+            for (int i = 0; i < 3; ++i) {
+                if (invisible->getFogTokens()[i] != -1) {
+                    int current = invisible->getFogTokens()[i];
+                    auto occupiedByEnemy = [&](int spaceId) {
+                        for (const auto& fighter : opponentPlayer().fighters()) {
+                            if (!fighter->defeated() && fighter->spaceId() == spaceId) return true;
+                        }
+                        return false;
+                    };
+                    auto occupiedByAny = [&](int spaceId) {
+                        return isSpaceOccupied(spaceId);
+                    };
+                    auto reachable = board_.reachableSpaces(current, 3, occupiedByEnemy, occupiedByAny);
+                    if (!reachable.empty()) {
+                        invisible->moveFogToken(i, reachable.front());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    currentPlayer().addToDiscard(std::move(card));
+    --actionsRemaining_;
+    endTurnIfNeeded();
+}
+
+void GameController::playConfirmSuspicion(int handIndex, int namedValue) {
+    Card card = currentPlayer().removeCardFromHand(handIndex);
+    auto matching = getMatchingCardIndicesForConfirmSuspicion(namedValue);
+    if (matching.empty()) {
+        std::string handInfo = "Opponent hand (no matching card): ";
+        const auto& hand = opponentPlayer().hand();
+        if (hand.empty()) {
+            handInfo += "(empty)";
+        } else {
+            for (size_t i = 0; i < hand.size(); ++i) {
+                handInfo += hand[i].getTitle();
+                if (i < hand.size() - 1) handInfo += ", ";
+            }
+        }
+        setConfirmSuspicionHandInfo(handInfo);
+        currentPlayer().addToDiscard(std::move(card));
+        --actionsRemaining_;
+        endTurnIfNeeded();
+    } else {
+        currentPlayer().addToDiscard(std::move(card));
+        --actionsRemaining_;
+        endTurnIfNeeded();
+    }
+}
+
+void GameController::handleStudyMethods(int cardIndex, bool won) {
+    (void)cardIndex;
+    if (!won) return;
+    std::string handInfo = "Opponent hand: ";
+    const auto& hand = opponentPlayer().hand();
+    if (hand.empty()) {
+        handInfo += "(empty)";
+    } else {
+        for (size_t i = 0; i < hand.size(); ++i) {
+            handInfo += hand[i].getTitle();
+            if (i < hand.size() - 1) handInfo += ", ";
+        }
+    }
+    setStudyMethodsHandInfo(handInfo);
+}
+
+void GameController::handleCodedNotes(int handIndex, const std::vector<int>& selectedIndices) {
+    if (selectedIndices.size() != 2) {
+        throw RuleViolation("You must select exactly 2 cards.");
+    }
+    
+    Card card = currentPlayer().removeCardFromHand(handIndex);
+
+    drawCard(currentPlayer());
+    drawCard(currentPlayer());
+    drawCard(currentPlayer());
+
+    std::vector<Card> cardsToTop;
+    std::set<int> sortedIndices(selectedIndices.begin(), selectedIndices.end());
+
+    for (auto it = sortedIndices.rbegin(); it != sortedIndices.rend(); ++it) {
+        int idx = *it;
+        if (idx < 0 || idx >= static_cast<int>(currentPlayer().hand().size())) {
+            throw RuleViolation("Invalid card index.");
+        }
+        Card removed = currentPlayer().removeCardFromHand(idx);
+        cardsToTop.push_back(std::move(removed));
+    }
+
+    for (auto& c : cardsToTop) {
+        currentPlayer().deck().push_back(std::move(c));
+    }
+    
+    currentPlayer().addToDiscard(std::move(card));
+    --actionsRemaining_;
+    endTurnIfNeeded();
 }
 
 } // namespace unmatched

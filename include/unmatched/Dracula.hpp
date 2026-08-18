@@ -15,16 +15,12 @@ public:
     std::vector<Card> createDeck() const override;
     std::vector<std::unique_ptr<Fighter>> createSidekicks() const override;
 
-    std::vector<Fighter>& getSisters();
-    const std::vector<Fighter>& getSisters() const;
-
     void useBloodStrike(int bonus);
     void activateMistForm();
     void deactivateMistForm();
     bool isMistFormActive() const;
 
 private:
-    std::vector<Fighter> sisters_;
     bool mistFormActive_;
 };
 

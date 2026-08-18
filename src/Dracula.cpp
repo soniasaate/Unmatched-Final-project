@@ -14,17 +14,7 @@ Dracula::Dracula()
           AttackRange::Melee,
           "Aggro"))
     , mistFormActive_(false) {
-    for (int i = 1; i <= 3; ++i) {
-        sisters_.emplace_back(FighterDefinition(
-            "sister" + std::to_string(i),
-            "Sister " + std::to_string(i),
-            Character::Sister,
-            false,
-            1,
-            2,
-            AttackRange::Melee,
-            "Sidekick"));
-    }
+
 }
 
 std::string Dracula::getSpecialAbility() const {
@@ -36,10 +26,7 @@ bool Dracula::canPlayCard(const Card& card) const {
         return true;
     }
     if (card.getOwner() == Character::Sister) {
-        for (const auto& sister : getSisters()) {
-            if (!sister.defeated()) return true;
-        }
-        return false;
+        return true;
     }
     return false;
 }
@@ -60,14 +47,6 @@ std::vector<std::unique_ptr<Fighter>> Dracula::createSidekicks() const {
         FighterDefinition("sister3", "Sister III", Character::Sister, false, 1, 2, AttackRange::Melee, "Sidekick")
     ));
     return sidekicks;
-}
-
-std::vector<Fighter>& Dracula::getSisters() {
-    return sisters_;
-}
-
-const std::vector<Fighter>& Dracula::getSisters() const {
-    return sisters_;
 }
 
 void Dracula::useBloodStrike(int) {
