@@ -24,9 +24,12 @@ public:
     std::vector<int> getFogSpaces() const;
     void resetFogTokens();
     int getDefenseBonus() const { return 1; }
+    void onTurnStart() override;
+    int getStartTurnSpace() const { return startTurnSpace_; }
 
 private:
     std::vector<int> fogTokens_;
+    int startTurnSpace_ = -1;
 };
 
 } // namespace unmatched

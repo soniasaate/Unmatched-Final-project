@@ -9,6 +9,8 @@
 #include <iomanip>
 #include <optional>
 #include <sstream>
+#include <fstream>
+#include <cstdio>
 
 namespace unmatched {
 namespace {
@@ -239,6 +241,7 @@ bool TuiApp::OnEvent(Event event) {
         if (event == Event::Character("s") || event == Event::Character("S")) {
             if (controller_.started() && !controller_.gameOver()) {
                 controller_.saveGame();
+                saveTuiState();
                 showError("Game saved successfully!");
                 return true;
             }
@@ -248,6 +251,7 @@ bool TuiApp::OnEvent(Event event) {
             if (controller_.canUndo()) {
                 try {
                     controller_.undoLastAction();
+                    selectedSchemeCardIndex_ = -1;
                     openGameScreen();
                     showError("Undo successful.");
                 } catch (const std::exception& e) {
@@ -628,7 +632,7 @@ void TuiApp::handleEnter() {
                 int slot = pendingSlots_[selected_].first;
                 try {
                     controller_.loadGame(slot);
-                    state_ = ScreenState::Game;
+                    loadTuiState();
                 } catch (const std::exception& e) {
                     showError(std::string("Failed to load: ") + e.what());
                     state_ = ScreenState::MainMenu;
@@ -724,29 +728,59 @@ void TuiApp::handleEnter() {
         openGameScreen();
         break;
 
-        case ScreenState::ConfoundChoice: {
+        case ScreenState::ConfoundChoice:
             if (selected_ == 0) {
-                const auto& opponentHand = controller_.opponentPlayer().hand();
-                if (opponentHand.empty()) {
-                    showError("Opponent has no cards to discard.");
-                    controller_.setConfoundSchemeCardIndex(-1);
-                    openGameScreen();
-                    return;
-                }
+                controller_.resolveConfoundChoice(true);
                 pendingCardIndexes_.clear();
-                for (int i = 0; i < static_cast<int>(opponentHand.size()); ++i) {
+                for (int i = 0; i < static_cast<int>(controller_.opponentPlayer().hand().size()); ++i) {
                     pendingCardIndexes_.push_back(i);
                 }
-                state_ = ScreenState::DiscardCard;
-                resetSelection();
+                if (pendingCardIndexes_.empty()) {
+                    controller_.resolveConfoundChoice(false);
+                    state_ = ScreenState::ConfoundFogSelect;
+                    resetSelection();
+                } else {
+                    state_ = ScreenState::ConfoundDiscardSelect;
+                    resetSelection();
+                }
             } else {
-                int cardIndex = controller_.getConfoundSchemeCardIndex();
-                controller_.handleConfoundFogMove(cardIndex);
-                controller_.setConfoundSchemeCardIndex(-1);
-                openGameScreen();
+                controller_.resolveConfoundChoice(false);
+                state_ = ScreenState::ConfoundFogSelect;
+                resetSelection();
             }
             break;
-        }
+
+        case ScreenState::ConfoundDiscardSelect:
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingCardIndexes_.size())) {
+                showError("Invalid card selection.");
+                return;
+            }
+            controller_.resolveConfoundDiscard(pendingCardIndexes_[selected_]);
+            openGameScreen();
+            break;
+
+        case ScreenState::ConfoundFogSelect:
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingFogIndices_.size())) {
+                showError("Invalid fog token selection.");
+                return;
+            }
+            selectedFogIndex_ = pendingFogIndices_[selected_];
+            pendingSpaces_.clear();
+            for (const auto& space : controller_.board().spaces()) {
+                pendingSpaces_.push_back(space.id());
+            }
+            state_ = ScreenState::ConfoundDestinationSelect;
+            resetSelection();
+            break;
+
+        case ScreenState::ConfoundDestinationSelect:
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingSpaces_.size())) {
+                showError("Invalid destination selection.");
+                return;
+            }
+            controller_.resolveConfoundFogMove(selectedFogIndex_, pendingSpaces_[selected_]);
+            openGameScreen();
+            break;
 
         case ScreenState::LurkingChoice: {
             controller_.handleLurking(lurkingCardIndex_, selected_);
@@ -1422,6 +1456,37 @@ std::vector<std::string> TuiApp::currentMenuEntries() const {
             }
             return entries;
         }
+        case ScreenState::ConfoundChoice:
+            return {"Yes, discard a card", "No, move a fog token"};
+
+        case ScreenState::ConfoundDiscardSelect: {
+            std::vector<std::string> entries;
+            for (int idx : pendingCardIndexes_) {
+                entries.push_back(cardMenuLabel(controller_.opponentPlayer(), idx));
+            }
+            return entries;
+        }
+
+        case ScreenState::ConfoundFogSelect: {
+            std::vector<std::string> entries;
+            const auto* invisible = dynamic_cast<const InvisibleMan*>(&controller_.currentPlayer().heroFighter());
+            if (invisible) {
+                const auto& tokens = invisible->getFogTokens();
+                for (int idx : pendingFogIndices_) {
+                    entries.push_back("Fog token " + std::to_string(idx + 1) + 
+                                    " (space " + std::to_string(tokens[idx]) + ")");
+                }
+            }
+            return entries;
+        }
+
+        case ScreenState::ConfoundDestinationSelect: {
+            std::vector<std::string> entries;
+            for (int space : pendingSpaces_) {
+                entries.push_back(spaceMenuLabel(space));
+            }
+            return entries;
+        }
         case ScreenState::FogChoice: {
             std::vector<std::string> entries;
             for (int index : pendingFogIndices_) {
@@ -1463,6 +1528,19 @@ void TuiApp::openGameScreen() {
     } else if (controller_.hasPendingFogChoice()) {
         pendingFogIndices_ = controller_.pendingFogChoices();
         state_ = ScreenState::FogChoice;
+    } else if (controller_.hasPendingConfoundChoice()) {
+        auto* invisible = dynamic_cast<InvisibleMan*>(&controller_.currentPlayer().heroFighter());
+        if (invisible) {
+            pendingFogIndices_.clear();
+            const auto& tokens = invisible->getFogTokens();
+            for (int i = 0; i < static_cast<int>(tokens.size()); ++i) {
+                if (tokens[i] != -1) {
+                    pendingFogIndices_.push_back(i);
+                }
+            }
+        }
+        state_ = ScreenState::ConfoundChoice;
+        resetSelection();
     } else if (controller_.hasPendingOptionalMovement()) {
         pendingSpaces_ = controller_.pendingOptionalMovementDestinations();
         state_ = ScreenState::OptionalMovementDestination;
@@ -1498,6 +1576,28 @@ void TuiApp::startGameFromSetup() {
     
     controller_.startNewGame(playerOneAge_, playerTwoAge_, std::move(hero1), std::move(hero2), selectedStartSlot_);
     state_ = ScreenState::Game;
+    selected_ = 0;
+    selectedAttackerId_.clear();
+    pendingSpaces_.clear();
+    pendingFighterIds_.clear();
+    pendingCardIndexes_.clear();
+    pendingValues_.clear();
+    pendingFogIndices_.clear();
+    selectedNamedValue_ = -1;
+    selectedAttackCardIndex_ = -1;
+    selectedDefenseCardIndex_ = -1;
+    selectedBeastFormBoostIndexes_.clear();
+    waitingForDestination_ = false;
+    codedNotesCardIndex_ = -1;
+    lurkingCardIndex_ = -1;
+    stepLightlyCardIndex_ = -1;
+    selectedCodedNotesIndices_.clear();
+    schemeChoice_ = SchemeChoice{};
+    selectedFogIndex_ = -1;
+
+    std::remove("tui_state.json");
+    
+    openGameScreen();
     resetSelection();
 }
 
@@ -1542,13 +1642,6 @@ void TuiApp::chooseSchemeCard(int selectedMenuIndex) {
     pendingValues_.clear();
 
     const Card& card = controller_.currentPlayer().hand().at(selectedSchemeCardIndex_);
-
-    if (card.getTitle() == "CONFOUND") {
-        controller_.setConfoundSchemeCardIndex(selectedSchemeCardIndex_);
-        state_ = ScreenState::ConfoundChoice;
-        resetSelection();
-        return;
-    }
 
     if (card.getTitle() == "LURKING") {
         lurkingCardIndex_ = selectedSchemeCardIndex_;
@@ -1812,6 +1905,90 @@ Element TuiApp::fighterLine(const Fighter& fighter) const {
         line << " space " << fighter.spaceId();
     }
     return text(line.str());
+}
+
+json TuiApp::serializeState() const {
+    json j;
+    j["state"] = static_cast<int>(state_);
+    j["selected"] = selected_;
+    j["selectedAttackerId"] = selectedAttackerId_;
+    j["pendingSpaces"] = pendingSpaces_;
+    j["pendingFighterIds"] = pendingFighterIds_;
+    j["pendingCardIndexes"] = pendingCardIndexes_;
+    j["pendingValues"] = pendingValues_;
+    j["pendingFogIndices"] = pendingFogIndices_;
+    j["selectedSchemeCardIndex"] = selectedSchemeCardIndex_;
+    j["selectedNamedValue"] = selectedNamedValue_;
+    j["selectedAttackCardIndex"] = selectedAttackCardIndex_;
+    j["selectedDefenseCardIndex"] = selectedDefenseCardIndex_;
+    j["selectedBeastFormBoostIndexes"] = selectedBeastFormBoostIndexes_;
+    j["waitingForDestination"] = waitingForDestination_;
+    j["codedNotesCardIndex"] = codedNotesCardIndex_;
+    j["lurkingCardIndex"] = lurkingCardIndex_;
+    j["stepLightlyCardIndex"] = stepLightlyCardIndex_;
+    std::vector<int> codedIndices(selectedCodedNotesIndices_.begin(), selectedCodedNotesIndices_.end());
+    j["selectedCodedNotesIndices"] = codedIndices;
+    json sc;
+    sc["destinationSpace"] = schemeChoice_.destinationSpace;
+    sc["targetFighterId"] = schemeChoice_.targetFighterId;
+    sc["namedValue"] = schemeChoice_.namedValue;
+    sc["opponentHandIndex"] = schemeChoice_.opponentHandIndex;
+    j["schemeChoice"] = sc;
+    return j;
+}
+
+void TuiApp::deserializeState(const json& j) {
+    state_ = static_cast<ScreenState>(j["state"].get<int>());
+    selected_ = j["selected"].get<int>();
+    selectedAttackerId_ = j.value("selectedAttackerId", "");
+    pendingSpaces_ = j.value("pendingSpaces", std::vector<int>{});
+    pendingFighterIds_ = j.value("pendingFighterIds", std::vector<std::string>{});
+    pendingCardIndexes_ = j.value("pendingCardIndexes", std::vector<int>{});
+    pendingValues_ = j.value("pendingValues", std::vector<int>{});
+    pendingFogIndices_ = j.value("pendingFogIndices", std::vector<int>{});
+    selectedSchemeCardIndex_ = j.value("selectedSchemeCardIndex", -1);
+    selectedNamedValue_ = j.value("selectedNamedValue", -1);
+    selectedAttackCardIndex_ = j.value("selectedAttackCardIndex", -1);
+    selectedDefenseCardIndex_ = j.value("selectedDefenseCardIndex", -1);
+    selectedBeastFormBoostIndexes_ = j.value("selectedBeastFormBoostIndexes", std::vector<int>{});
+    waitingForDestination_ = j.value("waitingForDestination", false);
+    codedNotesCardIndex_ = j.value("codedNotesCardIndex", -1);
+    lurkingCardIndex_ = j.value("lurkingCardIndex", -1);
+    stepLightlyCardIndex_ = j.value("stepLightlyCardIndex", -1);
+    if (j.contains("selectedCodedNotesIndices")) {
+        auto indices = j["selectedCodedNotesIndices"].get<std::vector<int>>();
+        selectedCodedNotesIndices_.clear();
+        for (int idx : indices) selectedCodedNotesIndices_.insert(idx);
+    }
+    if (j.contains("schemeChoice")) {
+        const auto& sc = j["schemeChoice"];
+        schemeChoice_.destinationSpace = sc.value("destinationSpace", -1);
+        schemeChoice_.targetFighterId = sc.value("targetFighterId", "");
+        schemeChoice_.namedValue = sc.value("namedValue", -1);
+        schemeChoice_.opponentHandIndex = sc.value("opponentHandIndex", -1);
+    }
+}
+
+void TuiApp::saveTuiState() const {
+    std::string filename = "tui_state.json";
+    std::ofstream file(filename);
+    file << serializeState().dump(4);
+}
+
+void TuiApp::loadTuiState() {
+    std::string filename = "tui_state.json";
+    if (!std::ifstream(filename).good()) {
+        return;
+    }
+    std::ifstream file(filename);
+    json j;
+    file >> j;
+    deserializeState(j);
+    if (state_ == ScreenState::Game) {
+        openGameScreen(); 
+    } else {
+        resetSelection();
+    }
 }
 
 }  // namespace unmatched

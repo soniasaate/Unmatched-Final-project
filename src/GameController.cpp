@@ -136,6 +136,13 @@ void GameController::startNewGame(int playerOneAge, int playerTwoAge,
     }
 
     currentPlayerIndex_ = youngerIndex;
+    for (auto& player : players_) {
+        for (auto& fighter : player.fighters()) {
+            if (!fighter->defeated()) {
+                fighter->onTurnStart();
+            }
+        }
+    }
     placeSidekicks(currentPlayer());
     placeSidekicks(opponentPlayer());
 
@@ -457,6 +464,12 @@ void GameController::resolveAttack(const std::string& attackerId,
                 defenseValue += 1;
             }
         }
+        if (attackCard.getTitle() == "DEDUCE STRATEGY") {
+            defenseValue = attackCard.getBoost();
+        }
+        if (defenseCard.has_value() && defenseCard->getTitle() == "DEDUCE STRATEGY") {
+            attackValue = defenseCard->getBoost();
+        }
 
         bool attackEffectsCanceled = false;
         bool defenseEffectsCanceled = false;
@@ -542,7 +555,7 @@ SchemeChoiceKind GameController::requiredChoiceForScheme(int handIndex) const {
     if (title == "ADMINISTER AID") return SchemeChoiceKind::Destination;
     if (title == "CONFIRM SUSPICION") return SchemeChoiceKind::NamedValue;
     if (title == "ELIMINATE THE IMPOSSIBLE") return SchemeChoiceKind::OpponentHandCard;
-    if (title == "MASTER OF DISGUISE") return SchemeChoiceKind::TargetFighter;
+    if (title == "MASTER OF DISGUISE") return SchemeChoiceKind::None;
     if (title == "RAVENING SEDUCTION") return SchemeChoiceKind::TargetAndDestination;
     return SchemeChoiceKind::None;
 }
@@ -586,7 +599,9 @@ std::vector<int> GameController::destinationChoicesForScheme(int handIndex, cons
             }
             return false;
         };
-        return board_.reachableSpaces(target->spaceId(), 2, occupiedByEnemy, occupiedByAny);
+        auto reachable = board_.reachableSpaces(target->spaceId(), 2, occupiedByEnemy, occupiedByAny);
+        reachable.erase(std::remove(reachable.begin(), reachable.end(), target->spaceId()), reachable.end());
+        return reachable;
     }
     return result;
 }
@@ -639,6 +654,13 @@ void GameController::playScheme(int handIndex, const SchemeChoice& choice) {
 
         Card card = player.removeCardFromHand(handIndex);
 
+        if (card.getTitle() == "RAVENING SEDUCTION") {
+            PendingRaveningChoice choice;
+            choice.handIndex = handIndex;
+            pendingRaveningChoice_ = choice;
+            return;
+        }
+
         int dummyAttack = 0;
         int dummyDefense = 0;
         card.applyEffect(player.heroFighter(), opponent.heroFighter(), *this, dummyAttack, dummyDefense);
@@ -666,6 +688,15 @@ void GameController::playScheme(int handIndex, const SchemeChoice& choice) {
                     drawCard(player);
                 }
             }
+        }
+
+        if (card.getTitle() == "ELIMINATE THE IMPOSSIBLE") {
+            if (choice.opponentHandIndex < 0 ||
+                choice.opponentHandIndex >= static_cast<int>(opponent.hand().size())) {
+                throw RuleViolation("Invalid card selection for Eliminate the Impossible.");
+            }
+            Card discarded = opponent.removeCardFromHand(choice.opponentHandIndex);
+            opponent.addToDiscard(std::move(discarded));
         }
 
         player.addToDiscard(std::move(card));
@@ -916,6 +947,14 @@ void GameController::advanceTurn() {
     draculaAbilityUsed_ = false;
     ++turnNumber_;
     pendingFogChoices_.clear();
+
+    for (auto& player : players_) {
+        for (auto& fighter : player.fighters()) {
+            if (!fighter->defeated()) {
+                fighter->onTurnStart();
+            }
+        }
+    }
 }
 
 void GameController::drawCard(Player& player) {
@@ -1127,6 +1166,15 @@ void GameController::resolveCombatEffectAfterDamage(const Card& card,
     }
     if (title == "THE GAME IS AFOOT") {
         queueOptionalMovement(cardPlayer.id(), cardFighter.id(), 3, "THE GAME IS AFOOT");
+        return;
+    }
+    if (title == "CONFOUND") {
+        if (dynamic_cast<InvisibleMan*>(&cardPlayer.heroFighter())) {
+            PendingConfoundChoice choice;
+            choice.playerIndex = opposingPlayer.id();
+            choice.opponentDecided = false;
+            pendingConfoundChoice_ = choice;
+        }
         return;
     }
     if (title == "THIRST FOR SUSTENANCE") {
@@ -1365,6 +1413,26 @@ void GameController::saveGame() {
     }
     j["pendingFogChoices"] = pendingFogChoicesJson;
 
+    if (pendingConfoundChoice_.has_value()) {
+        json pc;
+        pc["playerIndex"] = pendingConfoundChoice_->playerIndex;
+        pc["opponentDecided"] = pendingConfoundChoice_->opponentDecided;
+        pc["opponentWantsToDiscard"] = pendingConfoundChoice_->opponentWantsToDiscard;
+        j["pendingConfoundChoice"] = pc;
+    }
+
+    if (pendingRaveningChoice_.has_value()) {
+        json pr;
+        pr["handIndex"] = pendingRaveningChoice_->handIndex;
+        pr["movedFighters"] = pendingRaveningChoice_->movedFighters;
+        json pos;
+        for (const auto& [id, space] : pendingRaveningChoice_->newPositions) {
+            pos[id] = space;
+        }
+        pr["newPositions"] = pos;
+        j["pendingRaveningChoice"] = pr;
+    }
+
     json playersJson = json::array();
     for (const auto& player : players_) {
         json p;
@@ -1402,6 +1470,9 @@ void GameController::loadGame(int slot) {
     movedThisManeuver_.clear();
     finishedFighters_.clear();
     pendingOptionalMovements_.clear();
+    pendingFogChoices_.clear();
+    pendingConfoundChoice_.reset();
+    pendingRaveningChoice_.reset();
 
     turnNumber_ = j["turnNumber"].get<int>();
     currentPlayerIndex_ = j["currentPlayerIndex"].get<int>();
@@ -1453,6 +1524,26 @@ void GameController::loadGame(int slot) {
             choice.maxSteps = entry["maxSteps"].get<int>();
             pendingFogChoices_.push_back(choice);
         }
+    }
+
+    if (j.contains("pendingConfoundChoice")) {
+        const auto& pc = j["pendingConfoundChoice"];
+        PendingConfoundChoice choice;
+        choice.playerIndex = pc["playerIndex"].get<int>();
+        choice.opponentDecided = pc["opponentDecided"].get<bool>();
+        choice.opponentWantsToDiscard = pc["opponentWantsToDiscard"].get<bool>();
+        pendingConfoundChoice_ = choice;
+    }
+
+    if (j.contains("pendingRaveningChoice")) {
+        const auto& pr = j["pendingRaveningChoice"];
+        PendingRaveningChoice choice;
+        choice.handIndex = pr["handIndex"].get<int>();
+        choice.movedFighters = pr["movedFighters"].get<std::vector<std::string>>();
+        for (const auto& [key, value] : pr["newPositions"].items()) {
+            choice.newPositions[key] = value.get<int>();
+        }
+        pendingRaveningChoice_ = choice;
     }
 
     for (const auto& pJson : j["players"]) {
@@ -1564,7 +1655,12 @@ void GameController::handleVanish(int handIndex, int destinationSpace) {
         vanishedDestination_ = destinationSpace;
         pendingVanishedPlacement_ = true;
         currentPlayer().addToDiscard(std::move(card));
-        --actionsRemaining_;
+
+        if (actionsRemaining_ == 2) {
+            actionsRemaining_ = 0;
+        } else {
+            --actionsRemaining_;
+        }
         endTurnIfNeeded();
     } catch (...) {
         if (!undoStack_.empty()) undoStack_.pop_back();
@@ -1917,6 +2013,26 @@ json GameController::createFullSnapshot() const {
     }
     j["pendingFogChoices"] = pendingFogChoicesJson;
 
+    if (pendingConfoundChoice_.has_value()) {
+        json pc;
+        pc["playerIndex"] = pendingConfoundChoice_->playerIndex;
+        pc["opponentDecided"] = pendingConfoundChoice_->opponentDecided;
+        pc["opponentWantsToDiscard"] = pendingConfoundChoice_->opponentWantsToDiscard;
+        j["pendingConfoundChoice"] = pc;
+    }
+
+    if (pendingRaveningChoice_.has_value()) {
+        json pr;
+        pr["handIndex"] = pendingRaveningChoice_->handIndex;
+        pr["movedFighters"] = pendingRaveningChoice_->movedFighters;
+        json pos;
+        for (const auto& [id, space] : pendingRaveningChoice_->newPositions) {
+            pos[id] = space;
+        }
+        pr["newPositions"] = pos;
+        j["pendingRaveningChoice"] = pr;
+    }
+
     json playersJson = json::array();
     for (const auto& player : players_) {
         json p;
@@ -1945,6 +2061,8 @@ void GameController::restoreFullSnapshot(const json& j) {
     finishedFighters_.clear();
     pendingOptionalMovements_.clear();
     pendingFogChoices_.clear();
+    pendingConfoundChoice_.reset();
+    pendingRaveningChoice_.reset();
 
     turnNumber_ = j["turnNumber"].get<int>();
     currentPlayerIndex_ = j["currentPlayerIndex"].get<int>();
@@ -2005,6 +2123,26 @@ void GameController::restoreFullSnapshot(const json& j) {
         }
     }
 
+    if (j.contains("pendingConfoundChoice")) {
+        const auto& pc = j["pendingConfoundChoice"];
+        PendingConfoundChoice choice;
+        choice.playerIndex = pc["playerIndex"].get<int>();
+        choice.opponentDecided = pc["opponentDecided"].get<bool>();
+        choice.opponentWantsToDiscard = pc["opponentWantsToDiscard"].get<bool>();
+        pendingConfoundChoice_ = choice;
+    }
+
+    if (j.contains("pendingRaveningChoice")) {
+        const auto& pr = j["pendingRaveningChoice"];
+        PendingRaveningChoice choice;
+        choice.handIndex = pr["handIndex"].get<int>();
+        choice.movedFighters = pr["movedFighters"].get<std::vector<std::string>>();
+        for (const auto& [key, value] : pr["newPositions"].items()) {
+            choice.newPositions[key] = value.get<int>();
+        }
+        pendingRaveningChoice_ = choice;
+    }
+
     for (const auto& pJson : j["players"]) {
         std::string name = pJson["name"].get<std::string>();
         int age = pJson["age"].get<int>();
@@ -2057,6 +2195,153 @@ void GameController::undoLastAction() {
 
 void GameController::clearUndoStack() {
     undoStack_.clear();
+}
+
+bool GameController::hasPendingConfoundChoice() const {
+    return pendingConfoundChoice_.has_value();
+}
+
+void GameController::resolveConfoundChoice(bool opponentWantsToDiscard) {
+    if (!pendingConfoundChoice_.has_value()) {
+        throw RuleViolation("No pending confound choice.");
+    }
+    pendingConfoundChoice_->opponentWantsToDiscard = opponentWantsToDiscard;
+    pendingConfoundChoice_->opponentDecided = true;
+}
+
+void GameController::resolveConfoundDiscard(int cardIndex) {
+    if (!pendingConfoundChoice_.has_value() || !pendingConfoundChoice_->opponentDecided || !pendingConfoundChoice_->opponentWantsToDiscard) {
+        throw RuleViolation("Invalid confound discard state.");
+    }
+    Player& opponent = playerByIndex(pendingConfoundChoice_->playerIndex);
+    if (cardIndex < 0 || cardIndex >= static_cast<int>(opponent.hand().size())) {
+        throw RuleViolation("Invalid card index.");
+    }
+    Card discarded = opponent.removeCardFromHand(cardIndex);
+    opponent.addToDiscard(std::move(discarded));
+    pendingConfoundChoice_.reset();
+}
+
+void GameController::resolveConfoundFogMove(int fogIndex, int destinationSpace) {
+    if (!pendingConfoundChoice_.has_value() || !pendingConfoundChoice_->opponentDecided || pendingConfoundChoice_->opponentWantsToDiscard) {
+        throw RuleViolation("Invalid confound fog move state.");
+    }
+    Fighter& hero = currentPlayer().heroFighter();
+    auto* invisible = dynamic_cast<InvisibleMan*>(&hero);
+    if (!invisible) {
+        throw RuleViolation("Current player is not Invisible Man.");
+    }
+    if (fogIndex < 0 || fogIndex >= 3 || invisible->getFogTokens()[fogIndex] == -1) {
+        throw RuleViolation("Invalid fog token.");
+    }
+    if (!board_.contains(destinationSpace)) {
+        throw RuleViolation("Invalid destination space.");
+    }
+    invisible->moveFogToken(fogIndex, destinationSpace);
+    pendingConfoundChoice_.reset();
+}
+
+bool GameController::hasPendingRaveningChoice() const {
+    return pendingRaveningChoice_.has_value();
+}
+
+std::vector<std::string> GameController::getRaveningTargets() const {
+    if (!pendingRaveningChoice_.has_value()) return {};
+    std::vector<std::string> result;
+    for (const auto& player : players_) {
+        for (const auto& fighter : player.aliveFighters()) {
+            if (std::find(pendingRaveningChoice_->movedFighters.begin(),
+                          pendingRaveningChoice_->movedFighters.end(),
+                          fighter->id()) == pendingRaveningChoice_->movedFighters.end()) {
+                result.push_back(fighter->id());
+            }
+        }
+    }
+    return result;
+}
+
+std::vector<int> GameController::getRaveningDestinations(const std::string& fighterId) const {
+    if (!pendingRaveningChoice_.has_value()) return {};
+    const Fighter* fighter = findFighterById(fighterId);
+    if (!fighter || fighter->defeated()) return {};
+
+    auto occupiedByEnemy = [&](int spaceId) {
+        for (const auto& f : opponentPlayer().fighters()) {
+            if (!f->defeated() && f->spaceId() == spaceId) return true;
+        }
+        return false;
+    };
+    auto occupiedByAny = [&](int spaceId) {
+        return isSpaceOccupied(spaceId);
+    };
+    auto reachable = board_.reachableSpaces(fighter->spaceId(), 2, occupiedByEnemy, occupiedByAny);
+    reachable.erase(std::remove(reachable.begin(), reachable.end(), fighter->spaceId()), reachable.end());
+    return reachable;
+}
+
+void GameController::applyRaveningMove(const std::string& fighterId, int destinationSpace) {
+    if (!pendingRaveningChoice_.has_value()) {
+        throw RuleViolation("No pending ravening choice.");
+    }
+    if (!board_.contains(destinationSpace)) {
+        throw RuleViolation("Invalid destination.");
+    }
+    if (std::find(pendingRaveningChoice_->movedFighters.begin(),
+                  pendingRaveningChoice_->movedFighters.end(),
+                  fighterId) != pendingRaveningChoice_->movedFighters.end()) {
+        throw RuleViolation("This fighter has already been moved.");
+    }
+    const Fighter* fighter = findFighterById(fighterId);
+    if (!fighter || fighter->defeated()) throw RuleViolation("Invalid fighter.");
+
+    pendingRaveningChoice_->newPositions[fighterId] = destinationSpace;
+    pendingRaveningChoice_->movedFighters.push_back(fighterId);
+}
+
+void GameController::finishRaveningScheme() {
+    if (!pendingRaveningChoice_.has_value()) {
+        throw RuleViolation("No pending ravening choice.");
+    }
+
+    Player& player = currentPlayer();
+
+    for (const auto& [fighterId, newSpace] : pendingRaveningChoice_->newPositions) {
+        Fighter* fighter = findFighterById(fighterId);
+        if (fighter && !fighter->defeated()) {
+            fighter->placeAt(newSpace);
+        }
+    }
+
+    for (const auto& [fighterId, newSpace] : pendingRaveningChoice_->newPositions) {
+        Fighter* fighter = findFighterById(fighterId);
+        if (!fighter || fighter->defeated()) continue;
+
+        int damage = 0;
+        for (const auto& sister : player.fighters()) {
+            if (!sister->defeated() && sister->cardOwner() == Character::Sister &&
+                board_.areAdjacentForCombat(sister->spaceId(), fighter->spaceId())) {
+                ++damage;
+            }
+        }
+        if (damage > 0) {
+            fighter->damage(damage);
+        }
+    }
+
+    Card card = player.removeCardFromHand(pendingRaveningChoice_->handIndex);
+    player.addToDiscard(std::move(card));
+    --actionsRemaining_;
+
+    pendingRaveningChoice_.reset();
+    checkDefeatedFighters();
+    checkWinner();
+    endTurnIfNeeded();
+}
+
+void GameController::cancelRaveningScheme() {
+    if (pendingRaveningChoice_.has_value()) {
+        pendingRaveningChoice_.reset();
+    }
 }
 
 } // namespace unmatched

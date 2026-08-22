@@ -3,6 +3,7 @@
 #include "unmatched/GameController.hpp"
 #include "unmatched/Dracula.hpp"
 #include "unmatched/Sherlock.hpp"
+#include "unmatched/Serialization.hpp"
 
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/screen_interactive.hpp>
@@ -52,8 +53,14 @@ private:
         PlaceVanishedInvisibleMan,
         StudyMethodsView,
         ConfoundChoice,
+        ConfoundDiscardSelect,
+        ConfoundFogSelect,
+        ConfoundDestinationSelect,
         ConfirmSuspicionNoMatchView,
         CodedNotesSelect,
+        RaveningTarget,
+        RaveningDestination,
+        RaveningContinue,
         LurkingChoice,
         StepLightlyTarget,
         FogChoice,
@@ -124,6 +131,7 @@ private:
     int lurkingCardIndex_ = -1;
     int stepLightlyCardIndex_ = -1;
     std::vector<int> pendingFogIndices_;
+    std::string selectedRaveningFighterId_;
 
     std::vector<std::string> pendingFighterIds_;
     std::vector<int> pendingCardIndexes_;
@@ -138,6 +146,11 @@ private:
     std::vector<int> selectedBeastFormBoostIndexes_;
     SchemeChoice schemeChoice_;
     std::vector<std::pair<int, std::string>> pendingSlots_;
+    json serializeState() const;
+    void deserializeState(const json& j);
+    void saveTuiState() const;
+    void loadTuiState();
+    int selectedFogIndex_ = -1;
 };
 
 } // namespace unmatched

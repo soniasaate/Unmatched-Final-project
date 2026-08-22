@@ -13,7 +13,8 @@ InvisibleMan::InvisibleMan()
           2,
           AttackRange::Melee,
           "Stealth"))
-    , fogTokens_(3, -1) {
+    , fogTokens_(3, -1)
+    , startTurnSpace_(-1) {
 }
 
 std::string InvisibleMan::getSpecialAbility() const {
@@ -113,5 +114,10 @@ void InvisibleMan::resetFogTokens() {
         token = -1;
     }
 }
+
+void InvisibleMan::onTurnStart() {
+    startTurnSpace_ = spaceId();
+}
+
 
 } // namespace unmatched

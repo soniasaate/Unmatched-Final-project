@@ -266,12 +266,7 @@ std::vector<Card> DeckFactory::createDeckForSherlock() const {
         });
 
     addCopies(2, "ELIMINATE THE IMPOSSIBLE", Character::Sherlock, CardType::Scheme, -1, -1, 2, Timing::None,
-        [](Fighter&, Fighter&, GameController& controller, int&, int&) {
-            Player& opponent = controller.opponentPlayer();
-            if (opponent.hand().empty()) return;
-            int idx = controller.getRandomInt(0, static_cast<int>(opponent.hand().size()) - 1);
-            Card discarded = opponent.removeCardFromHand(idx);
-            opponent.addToDiscard(std::move(discarded));
+        [](Fighter&, Fighter&, GameController&, int&, int&) {
         });
 
     addCopies(3, "FEINT", Character::Any, CardType::Versatile, 2, 2, 1, Timing::Immediately,
@@ -294,16 +289,17 @@ std::vector<Card> DeckFactory::createDeckForSherlock() const {
         [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
             auto* sherlock = dynamic_cast<Sherlock*>(&attacker);
             if (!sherlock) return;
-            for (auto& fighter : controller.opponentPlayer().fighters()) {
-                if (!fighter->defeated()) {
-                    int sherlockSpace = sherlock->spaceId();
-                    int targetSpace = fighter->spaceId();
-                    sherlock->placeAt(targetSpace);
-                    fighter->placeAt(sherlockSpace);
-                    fighter->damage(1);
-                    break;
-                }
-            }
+
+            Fighter& opponentHero = controller.opponentPlayer().heroFighter();
+            if (opponentHero.defeated()) return;
+            
+            int sherlockSpace = sherlock->spaceId();
+            int targetSpace = opponentHero.spaceId();
+
+            sherlock->placeAt(targetSpace);
+            opponentHero.placeAt(sherlockSpace);
+
+            opponentHero.damage(1);
         });
 
     addCopies(2, "THE GAME IS AFOOT", Character::Sherlock, CardType::Attack, 5, -1, 2, Timing::AfterCombat,
@@ -405,7 +401,7 @@ std::vector<Card> DeckFactory::createDeckForInvisibleMan() const {
     addCopies(2, "EMERGE FROM MIST", Character::InvisibleMan, CardType::Attack, 3, -1, 2, Timing::DuringCombat,
         [](Fighter& attacker, Fighter&, GameController&, int& attackValue, int&) {
             auto* invisible = dynamic_cast<InvisibleMan*>(&attacker);
-            if (invisible && invisible->isOnFog(attacker.spaceId())) {
+            if (invisible && invisible->isOnFog(invisible->getStartTurnSpace())) {
                 attackValue = 5;
             }
         });
@@ -514,12 +510,27 @@ std::vector<Card> DeckFactory::createDeckForInvisibleMan() const {
         [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
             auto* invisible = dynamic_cast<InvisibleMan*>(&attacker);
             if (!invisible) return;
+
             int damage = invisible->isOnFog(attacker.spaceId()) ? 3 : 1;
             for (auto& fighter : controller.opponentPlayer().fighters()) {
                 if (!fighter->defeated() && 
                     controller.board().areAdjacentForCombat(attacker.spaceId(), fighter->spaceId())) {
                     fighter->damage(damage);
                     break;
+                }
+            }
+            auto* opponentInvisible = dynamic_cast<InvisibleMan*>(&controller.opponentPlayer().heroFighter());
+            if (opponentInvisible) {
+                bool hasFog = false;
+                for (int token : opponentInvisible->getFogTokens()) {
+                    if (token != -1) { hasFog = true; break; }
+                }
+                if (hasFog) {
+                    controller.queueFogChoice(
+                        controller.opponentPlayer().id(),
+                        opponentInvisible->id(),
+                        2
+                    );
                 }
             }
         });

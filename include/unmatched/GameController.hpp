@@ -44,6 +44,18 @@ struct PendingFogChoice {
     int maxSteps = 0;
 };
 
+struct PendingConfoundChoice {
+    int playerIndex = -1;
+    bool opponentDecided = false;
+    bool opponentWantsToDiscard = false;
+    bool fogMoveDone = false;
+};
+
+struct PendingRaveningChoice {
+    int handIndex = -1;
+    std::vector<std::string> movedFighters;
+    std::map<std::string, int> newPositions;
+};
 class GameController {
 public:
     GameController();
@@ -96,6 +108,12 @@ public:
     std::vector<int> namedValueChoicesForScheme(int handIndex) const;
     std::vector<int> opponentHandChoicesForScheme(int handIndex) const;
     void playScheme(int handIndex, const SchemeChoice& choice);
+    bool hasPendingRaveningChoice() const;
+    std::vector<std::string> getRaveningTargets() const;
+    std::vector<int> getRaveningDestinations(const std::string& fighterId) const;
+    void applyRaveningMove(const std::string& fighterId, int destinationSpace);
+    void finishRaveningScheme();
+    void cancelRaveningScheme();
 
     std::vector<int> getMatchingCardIndicesForConfirmSuspicion(int namedValue) const;
     void applyConfirmSuspicion(int chosenIndex);
@@ -153,6 +171,10 @@ public:
     void handleLurking(int handIndex, int choice);
     void playConfirmSuspicion(int handIndex, int namedValue);
     void handleStudyMethods(int cardIndex, bool won);
+    bool hasPendingConfoundChoice() const;
+    void resolveConfoundChoice(bool opponentWantsToDiscard);
+    void resolveConfoundDiscard(int cardIndex);
+    void resolveConfoundFogMove(int fogIndex, int destinationSpace);
     void setStudyMethodsHandInfo(const std::string& info) { studyMethodsHandInfo_ = info; }
     void handleCodedNotes(int handIndex, const std::vector<int>& selectedIndices);
 
@@ -223,6 +245,8 @@ private:
     int confoundSchemeCardIndex_ = -1;
     std::string confirmSuspicionHandInfo_;
     std::deque<PendingFogChoice> pendingFogChoices_;
+    std::optional<PendingConfoundChoice> pendingConfoundChoice_;
+    std::optional<PendingRaveningChoice> pendingRaveningChoice_;
 
     std::vector<json> undoStack_;
     static constexpr size_t MAX_UNDO_STATES = 30;
