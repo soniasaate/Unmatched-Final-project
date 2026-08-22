@@ -54,6 +54,9 @@ private:
         ConfoundChoice,
         ConfirmSuspicionNoMatchView,
         CodedNotesSelect,
+        LurkingChoice,
+        StepLightlyTarget,
+        FogChoice,
         LoadGame,
         GameOver,
     };
@@ -74,6 +77,8 @@ private:
     ftxui::Element renderConfoundChoiceView() const;
     ftxui::Element renderConfirmSuspicionNoMatchView() const;
     ftxui::Element renderCodedNotesView() const;
+    ftxui::Element renderLurkingChoiceView() const;
+    ftxui::Element renderStepLightlyTargetView() const;
     ftxui::Element renderMenuLines(const std::vector<std::string>& entries, const std::string& title) const;
 
     bool handleEvent(ftxui::Event event);
@@ -116,6 +121,9 @@ private:
     bool waitingForDestination_;
     std::set<size_t> selectedCodedNotesIndices_;
     int codedNotesCardIndex_ = -1;
+    int lurkingCardIndex_ = -1;
+    int stepLightlyCardIndex_ = -1;
+    std::vector<int> pendingFogIndices_;
 
     std::vector<std::string> pendingFighterIds_;
     std::vector<int> pendingCardIndexes_;

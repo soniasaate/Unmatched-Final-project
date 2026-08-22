@@ -114,6 +114,10 @@ Element TuiApp::Render() {
             return renderConfoundChoiceView();
         case ScreenState::CodedNotesSelect:
             return renderCodedNotesView();
+        case ScreenState::LurkingChoice:
+            return renderLurkingChoiceView();
+        case ScreenState::StepLightlyTarget:
+            return renderStepLightlyTargetView();  
         case ScreenState::ConfirmSuspicionNoMatchView:
             return renderConfirmSuspicionNoMatchView();
         default:
@@ -136,6 +140,20 @@ Element TuiApp::renderLoadGameView() const {
     }
     
     return vbox(std::move(body)) | border | size(WIDTH, GREATER_THAN, 72) | center;
+}
+
+Element TuiApp::renderStepLightlyTargetView() const {
+    Elements body;
+    body.push_back(text("STEP LIGHTLY") | bold | color(Color::Yellow) | center);
+    body.push_back(separator());
+    body.push_back(text("Choose a target fighter:") | center);
+    for (const auto& id : pendingFighterIds_) {
+        body.push_back(menuLine(fighterMenuLabel(id), false));
+    }
+    if (!errorMessage_.empty()) {
+        body.push_back(text(errorMessage_) | color(Color::Red));
+    }
+    return vbox(std::move(body)) | border | center | size(WIDTH, GREATER_THAN, 60);
 }
 
 Element TuiApp::renderConfoundChoiceView() const {
@@ -203,6 +221,19 @@ Element TuiApp::renderCodedNotesView() const {
     return vbox(std::move(body)) | border | center | size(WIDTH, GREATER_THAN, 60);
 }
 
+Element TuiApp::renderLurkingChoiceView() const {
+    Elements body;
+    body.push_back(text("LURKING") | bold | color(Color::Yellow) | center);
+    body.push_back(separator());
+    body.push_back(text("Choose an effect:") | center);
+    body.push_back(menuLine("[1] Move Invisible Man to a space with Fog", selected_ == 0));
+    body.push_back(menuLine("[2] Move a Fog Token up to 3 spaces", selected_ == 1));
+    if (!errorMessage_.empty()) {
+        body.push_back(text(errorMessage_) | color(Color::Red));
+    }
+    return vbox(std::move(body)) | border | center | size(WIDTH, GREATER_THAN, 60);
+}
+
 bool TuiApp::OnEvent(Event event) {
     try {
         if (event == Event::Character("s") || event == Event::Character("S")) {
@@ -210,6 +241,20 @@ bool TuiApp::OnEvent(Event event) {
                 controller_.saveGame();
                 showError("Game saved successfully!");
                 return true;
+            }
+            return true;
+        }
+        if (event == Event::Character("z") || event == Event::Character("Z")) {
+            if (controller_.canUndo()) {
+                try {
+                    controller_.undoLastAction();
+                    openGameScreen();
+                    showError("Undo successful.");
+                } catch (const std::exception& e) {
+                    showError(std::string("Undo failed: ") + e.what());
+                }
+            } else {
+                showError("Nothing to undo.");
             }
             return true;
         }
@@ -452,6 +497,9 @@ Element TuiApp::renderActionPanel() const {
         case ScreenState::DiscardToLimit:
             title = "Discard Cards";
             break;
+        case ScreenState::FogChoice:
+            title = "Choose a Fog Token to move";
+            break;
         case ScreenState::DraculaAbilityTarget:
             title = "Dracula Ability";
             break;
@@ -642,6 +690,30 @@ void TuiApp::handleEnter() {
             resetSelection();
             break;
 
+        case ScreenState::StepLightlyTarget: {
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingFighterIds_.size())) {
+                showError("Invalid target selection.");
+                return;
+            }
+            std::string targetId = pendingFighterIds_[selected_];
+            controller_.handleStepLightly(stepLightlyCardIndex_, targetId);
+            stepLightlyCardIndex_ = -1;
+            pendingFighterIds_.clear();
+            openGameScreen();
+            break;
+        }
+
+        case ScreenState::FogChoice: {
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingFogIndices_.size())) {
+                showError("Invalid fog token selection.");
+                return;
+            }
+            int fogIndex = pendingFogIndices_.at(selected_);
+            controller_.resolvePendingFogChoice(fogIndex);
+            openGameScreen();
+            break;
+        }
+
         case ScreenState::StartSelect:
             selectedStartSlot_ = selected_ == 0 ? 1 : 2;
             startGameFromSetup();
@@ -654,27 +726,32 @@ void TuiApp::handleEnter() {
 
         case ScreenState::ConfoundChoice: {
             if (selected_ == 0) {
-                pendingCardIndexes_.clear();
-                for (int i = 0; i < static_cast<int>(controller_.opponentPlayer().hand().size()); ++i) {
-                    pendingCardIndexes_.push_back(i);
-                }
-                if (pendingCardIndexes_.empty()) {
+                const auto& opponentHand = controller_.opponentPlayer().hand();
+                if (opponentHand.empty()) {
                     showError("Opponent has no cards to discard.");
                     controller_.setConfoundSchemeCardIndex(-1);
                     openGameScreen();
                     return;
                 }
+                pendingCardIndexes_.clear();
+                for (int i = 0; i < static_cast<int>(opponentHand.size()); ++i) {
+                    pendingCardIndexes_.push_back(i);
+                }
                 state_ = ScreenState::DiscardCard;
                 resetSelection();
             } else {
                 int cardIndex = controller_.getConfoundSchemeCardIndex();
-                Card card = controller_.currentPlayer().removeCardFromHand(cardIndex);
-                controller_.currentPlayer().addToDiscard(std::move(card));
+                controller_.handleConfoundFogMove(cardIndex);
                 controller_.setConfoundSchemeCardIndex(-1);
-                controller_.decrementActions();
-                controller_.endTurnIfNeeded();
                 openGameScreen();
             }
+            break;
+        }
+
+        case ScreenState::LurkingChoice: {
+            controller_.handleLurking(lurkingCardIndex_, selected_);
+            lurkingCardIndex_ = -1;
+            openGameScreen();
             break;
         }
 
@@ -770,6 +847,18 @@ void TuiApp::handleEnter() {
             } else if (choice == "Back to main menu") {
                 state_ = ScreenState::MainMenu;
                 resetSelection();
+            } else if (choice == "Undo last action (Z)") {
+                if (controller_.canUndo()) {
+                    try {
+                        controller_.undoLastAction();
+                        openGameScreen();
+                        showError("Undo successful.");
+                    } catch (const std::exception& e) {
+                        showError(std::string("Undo failed: ") + e.what());
+                    }
+                } else {
+                    showError("Nothing to undo.");
+                }
             }
             break;
         }
@@ -1016,7 +1105,10 @@ void TuiApp::handleEnter() {
                 showError("Invalid card selection.");
                 return;
             }
-            controller_.discardCurrentPlayerCard(pendingCardIndexes_.at(static_cast<std::size_t>(selected_)));
+            int cardIndex = controller_.getConfoundSchemeCardIndex();
+            int opponentCardIndex = pendingCardIndexes_.at(selected_);
+            controller_.handleConfoundDiscard(cardIndex, opponentCardIndex);
+            controller_.setConfoundSchemeCardIndex(-1);
             openGameScreen();
             break;
         }
@@ -1161,6 +1253,9 @@ std::vector<std::string> TuiApp::currentMenuEntries() const {
             std::vector<std::string> entries;
             if (controller_.draculaAbilityAvailable()) {
                 entries.push_back("Use Dracula start ability");
+            }
+            if (controller_.canUndo()) {
+                entries.push_back("Undo last action (Z)");
             }
             entries.push_back("Maneuver");
             entries.push_back("Attack");
@@ -1327,6 +1422,13 @@ std::vector<std::string> TuiApp::currentMenuEntries() const {
             }
             return entries;
         }
+        case ScreenState::FogChoice: {
+            std::vector<std::string> entries;
+            for (int index : pendingFogIndices_) {
+                entries.push_back("Fog Token " + std::to_string(index + 1));
+            }
+            return entries;
+        }
         case ScreenState::PlaceVanishedInvisibleMan: {
             std::vector<std::string> entries;
             for (int space : pendingSpaces_) {
@@ -1358,6 +1460,9 @@ void TuiApp::openGameScreen() {
         state_ = ScreenState::ConfirmSuspicionNoMatchView;
     } else if (controller_.getConfoundSchemeCardIndex() != -1) {
         state_ = ScreenState::ConfoundChoice;
+    } else if (controller_.hasPendingFogChoice()) {
+        pendingFogIndices_ = controller_.pendingFogChoices();
+        state_ = ScreenState::FogChoice;
     } else if (controller_.hasPendingOptionalMovement()) {
         pendingSpaces_ = controller_.pendingOptionalMovementDestinations();
         state_ = ScreenState::OptionalMovementDestination;
@@ -1444,7 +1549,36 @@ void TuiApp::chooseSchemeCard(int selectedMenuIndex) {
         resetSelection();
         return;
     }
-    
+
+    if (card.getTitle() == "LURKING") {
+        lurkingCardIndex_ = selectedSchemeCardIndex_;
+        state_ = ScreenState::LurkingChoice;
+        resetSelection();
+        return;
+    }
+
+    if (card.getTitle() == "STEP LIGHTLY") {
+        pendingFighterIds_.clear();
+        const Fighter& invisible = controller_.currentPlayer().heroFighter();
+        for (auto& fighter : controller_.opponentPlayer().fighters()) {
+            if (!fighter->defeated() && controller_.board().areAdjacentForCombat(invisible.spaceId(), fighter->spaceId())) {
+                pendingFighterIds_.push_back(fighter->id());
+            }
+        }
+        if (pendingFighterIds_.empty()) {
+            showError("No adjacent enemy fighters.");
+            Card played = controller_.currentPlayer().removeCardFromHand(selectedSchemeCardIndex_);
+            controller_.currentPlayer().addToDiscard(std::move(played));
+            controller_.decrementActions();
+            openGameScreen();
+            return;
+        }
+        stepLightlyCardIndex_ = selectedSchemeCardIndex_;
+        state_ = ScreenState::StepLightlyTarget;
+        resetSelection();
+        return;
+    }
+
     if (card.getTitle() == "CODED NOTES") {
         codedNotesCardIndex_ = selectedSchemeCardIndex_;
         selectedCodedNotesIndices_.clear();

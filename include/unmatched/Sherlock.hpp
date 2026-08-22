@@ -2,6 +2,8 @@
 
 #include "unmatched/Fighter.hpp"
 #include <string>
+#include <vector>
+#include <memory>
 
 namespace unmatched {
 
@@ -13,11 +15,13 @@ public:
     bool canPlayCard(const Card& card) const override;
     std::vector<Card> createDeck() const override;
     std::vector<std::unique_ptr<Fighter>> createSidekicks() const override;
+
     Fighter& getWatson();
     const Fighter& getWatson() const;
+    void setWatson(Fighter* watson);
 
 private:
-    Fighter watson_;
+    Fighter* watson_;
 };
 
 } // namespace unmatched

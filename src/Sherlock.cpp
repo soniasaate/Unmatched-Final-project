@@ -1,5 +1,6 @@
 #include "unmatched/Sherlock.hpp"
 #include "unmatched/Factories.hpp"
+#include "unmatched/GameExceptions.hpp"
 
 namespace unmatched {
 
@@ -13,15 +14,7 @@ Sherlock::Sherlock()
           2,
           AttackRange::Melee,
           "Intel"))
-    , watson_(FighterDefinition(
-          "watson",
-          "Dr. Watson",
-          Character::Watson,
-          false,
-          8,
-          2,
-          AttackRange::Ranged,
-          "Support")) {
+    , watson_(nullptr) {
 }
 
 std::string Sherlock::getSpecialAbility() const {
@@ -33,17 +26,28 @@ bool Sherlock::canPlayCard(const Card& card) const {
         return true;
     }
     if (card.getOwner() == Character::Watson) {
-        return !getWatson().defeated();
+        if (!watson_) return false;
+        return !watson_->defeated();
     }
     return false;
 }
 
 Fighter& Sherlock::getWatson() {
-    return watson_;
+    if (!watson_) {
+        throw RuleViolation("Watson has not been initialized.");
+    }
+    return *watson_;
 }
 
 const Fighter& Sherlock::getWatson() const {
-    return watson_;
+    if (!watson_) {
+        throw RuleViolation("Watson has not been initialized.");
+    }
+    return *watson_;
+}
+
+void Sherlock::setWatson(Fighter* watson) {
+    watson_ = watson;
 }
 
 std::vector<Card> Sherlock::createDeck() const {

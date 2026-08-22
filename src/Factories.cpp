@@ -254,8 +254,7 @@ std::vector<Card> DeckFactory::createDeckForSherlock() const {
         });
 
     addCopies(3, "DEDUCE STRATEGY", Character::Sherlock, CardType::Versatile, 3, 3, 1, Timing::DuringCombat,
-        [](Fighter&, Fighter&, GameController&, int& attackValue, int&) {
-            attackValue = 1;
+        [](Fighter&, Fighter&, GameController&, int&, int&) {
         });
 
     addCopies(2, "EDUCATION NEVER ENDS", Character::Any, CardType::Versatile, 3, 3, 1, Timing::AfterCombat,
@@ -370,8 +369,23 @@ std::vector<Card> DeckFactory::createDeckForInvisibleMan() const {
                     auto reachable = controller.board().reachableSpaces(current, 2, occupiedByEnemy, occupiedByAny);
                     if (!reachable.empty()) {
                         invisible->moveFogToken(i, reachable.front());
-                        return;
+                        break;
                     }
+                }
+            }
+
+            auto* opponentInvisible = dynamic_cast<InvisibleMan*>(&controller.opponentPlayer().heroFighter());
+            if (opponentInvisible) {
+                bool hasFog = false;
+                for (int token : opponentInvisible->getFogTokens()) {
+                    if (token != -1) { hasFog = true; break; }
+                }
+                if (hasFog) {
+                    controller.queueFogChoice(
+                        controller.opponentPlayer().id(),
+                        opponentInvisible->id(),
+                        2
+                    );
                 }
             }
         });

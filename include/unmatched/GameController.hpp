@@ -4,6 +4,7 @@
 #include "unmatched/Card.hpp"
 #include "unmatched/Factories.hpp"
 #include "unmatched/Player.hpp"
+#include "unmatched/Serialization.hpp"
 #include <deque>
 #include <optional>
 #include <random>
@@ -37,13 +38,19 @@ struct PendingMovementChoice {
     std::string source;
 };
 
+struct PendingFogChoice {
+    int playerIndex = -1;
+    std::string fighterId;
+    int maxSteps = 0;
+};
+
 class GameController {
 public:
     GameController();
 
-    void startNewGame(int playerOneAge, int playerTwoAge, 
-                  std::unique_ptr<Fighter> hero1, 
-                  std::unique_ptr<Fighter> hero2, 
+    void startNewGame(int playerOneAge, int playerTwoAge,
+                  std::unique_ptr<Fighter> hero1,
+                  std::unique_ptr<Fighter> hero2,
                   int youngerStartSlot);
     bool started() const;
     bool gameOver() const;
@@ -74,7 +81,7 @@ public:
     std::vector<std::string> legalTargetsFor(const std::string& attackerId) const;
     std::vector<int> legalAttackCardsFor(const std::string& attackerId) const;
     std::vector<int> legalDefenseCardsFor(const std::string& defenderId) const;
-    
+
     void resolveAttack(const std::string& attackerId,
                        const std::string& defenderId,
                        int attackCardIndex,
@@ -134,7 +141,8 @@ public:
     void setConfirmSuspicionHandInfo(const std::string& info);
     const std::string& getConfirmSuspicionHandInfo() const { return confirmSuspicionHandInfo_; }
     void clearConfirmSuspicionHandInfo() { confirmSuspicionHandInfo_.clear(); }
-
+    void handleConfoundDiscard(int handIndex, int opponentCardIndex);
+    void handleConfoundFogMove(int handIndex);
     void saveGame();
     void loadGame(int slot);
     std::vector<std::pair<int, std::string>> getSaveSlots() const;
@@ -147,11 +155,24 @@ public:
     void handleStudyMethods(int cardIndex, bool won);
     void setStudyMethodsHandInfo(const std::string& info) { studyMethodsHandInfo_ = info; }
     void handleCodedNotes(int handIndex, const std::vector<int>& selectedIndices);
+
+    void pushUndoState();
+    bool canUndo() const;
+    void undoLastAction();
+    void clearUndoStack();
+
+    bool hasPendingFogChoice() const;
+    const PendingFogChoice& pendingFogChoice() const;
+    std::vector<int> pendingFogChoices() const;
+    void resolvePendingFogChoice(int fogIndex);
+    void queueFogChoice(int playerIndex, const std::string& fighterId, int maxSteps);
+
 private:
     std::map<std::string, int> remainingMovementPoints_;
     std::map<std::string, int> movedThisManeuver_;
     std::vector<std::string> finishedFighters_;
-    
+    int vanishedDestination_ = -1;
+
     bool isSpaceOccupiedByEnemy(int spaceId) const;
     bool isSpaceOccupiedByAlly(int spaceId, const std::string& excludeFighterId) const;
     bool isSpaceOccupiedByAny(int spaceId) const;
@@ -195,13 +216,20 @@ private:
     std::string winnerName_;
     std::mt19937 random_;
     int pendingMovementPoints_;
-    int maxMovementPoints_; 
+    int maxMovementPoints_;
     std::deque<PendingMovementChoice> pendingOptionalMovements_;
     bool pendingVanishedPlacement_;
     std::string studyMethodsHandInfo_;
     int confoundSchemeCardIndex_ = -1;
     std::string confirmSuspicionHandInfo_;
+    std::deque<PendingFogChoice> pendingFogChoices_;
+
+    std::vector<json> undoStack_;
+    static constexpr size_t MAX_UNDO_STATES = 30;
+
     std::map<int, int> computeReachableWithCost(int start, int maxSteps, const std::string& fighterId) const;
+    json createFullSnapshot() const;
+    void restoreFullSnapshot(const json& snapshot);
 };
 
 } // namespace unmatched
