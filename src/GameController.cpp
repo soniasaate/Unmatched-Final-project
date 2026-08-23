@@ -761,10 +761,10 @@ void GameController::endTurnIfNeeded() {
     if (gameOver_) return;
     if (!pendingOptionalMovements_.empty()) return;
     if (actionsRemaining_ == 0 && currentPlayerMustDiscardToLimit()) return;
+    if (!pendingFogChoices_.empty()) return;
     if (actionsRemaining_ == 0) {
         advanceTurn();
     }
-    if (!pendingFogChoices_.empty()) return;
 }
 
 bool GameController::currentPlayerMustDiscardToLimit() const {
@@ -1406,7 +1406,8 @@ void GameController::saveGame() {
     json pendingFogChoicesJson = json::array();
     for (const auto& fogChoice : pendingFogChoices_) {
         json entry;
-        entry["playerIndex"] = fogChoice.playerIndex;
+        entry["chooserPlayerIndex"] = fogChoice.chooserPlayerIndex;
+        entry["fighterOwnerIndex"] = fogChoice.fighterOwnerIndex;
         entry["fighterId"] = fogChoice.fighterId;
         entry["maxSteps"] = fogChoice.maxSteps;
         pendingFogChoicesJson.push_back(entry);
@@ -1519,7 +1520,8 @@ void GameController::loadGame(int slot) {
     if (j.contains("pendingFogChoices")) {
         for (const auto& entry : j["pendingFogChoices"]) {
             PendingFogChoice choice;
-            choice.playerIndex = entry["playerIndex"].get<int>();
+            choice.chooserPlayerIndex = entry["chooserPlayerIndex"].get<int>();
+            choice.fighterOwnerIndex = entry["fighterOwnerIndex"].get<int>();
             choice.fighterId = entry["fighterId"].get<std::string>();
             choice.maxSteps = entry["maxSteps"].get<int>();
             pendingFogChoices_.push_back(choice);
@@ -1678,6 +1680,21 @@ void GameController::handleStepLightly(int handIndex, const std::string& targetF
             Fighter* target = findFighterById(targetFighterId);
             if (target && !target->defeated()) {
                 target->damage(damage);
+            }
+
+            auto* currentInvisible = dynamic_cast<InvisibleMan*>(&currentPlayer().heroFighter());
+            if (currentInvisible) {
+                bool hasFog = false;
+                for (int token : currentInvisible->getFogTokens()) {
+                    if (token != -1) { hasFog = true; break; }
+                }
+                if (hasFog) {
+                    queueFogChoice(
+                        opponentPlayer().id(),
+                        currentInvisible->id(),
+                        2
+                    );
+                }
             }
         }
         currentPlayer().addToDiscard(std::move(card));
@@ -1882,9 +1899,9 @@ const PendingFogChoice& GameController::pendingFogChoice() const {
 
 std::vector<int> GameController::pendingFogChoices() const {
     const auto& pending = pendingFogChoice();
-    const Fighter* fighter = findFighterById(pending.fighterId);
-    if (!fighter) return {};
-    const auto* invisible = dynamic_cast<const InvisibleMan*>(fighter);
+    const Player& owner = playerByIndex(pending.fighterOwnerIndex);
+    const Fighter& fighter = owner.fighterById(pending.fighterId);
+    const auto* invisible = dynamic_cast<const InvisibleMan*>(&fighter);
     if (!invisible) return {};
 
     std::vector<int> result;
@@ -1896,54 +1913,58 @@ std::vector<int> GameController::pendingFogChoices() const {
 }
 
 void GameController::resolvePendingFogChoice(int fogIndex) {
-    pushUndoState();
-    try {
-        if (pendingFogChoices_.empty()) {
-            throw RuleViolation("There is no pending fog choice.");
+    if (pendingFogChoices_.empty()) {
+        throw RuleViolation("There is no pending fog choice.");
+    }
+
+    PendingFogChoice pending = pendingFogChoices_.front();
+    pendingFogChoices_.pop_front();
+
+    Player& owner = playerByIndex(pending.fighterOwnerIndex);
+    Fighter& fighter = owner.fighterById(pending.fighterId);
+    auto* invisible = dynamic_cast<InvisibleMan*>(&fighter);
+    if (!invisible) return;
+
+    const auto& tokens = invisible->getFogTokens();
+    if (fogIndex < 0 || fogIndex >= static_cast<int>(tokens.size())) {
+        throw RuleViolation("Invalid fog token index.");
+    }
+
+    int current = tokens[fogIndex];
+    auto occupiedByEnemy = [&](int spaceId) {
+        for (const auto& f : opponentOf(owner).fighters()) {
+            if (!f->defeated() && f->spaceId() == spaceId) return true;
         }
+        return false;
+    };
+    auto occupiedByAny = [&](int spaceId) {
+        return isSpaceOccupied(spaceId);
+    };
 
-        PendingFogChoice pending = pendingFogChoices_.front();
-        pendingFogChoices_.pop_front();
-
-        Player& player = playerByIndex(pending.playerIndex);
-        Fighter& fighter = player.fighterById(pending.fighterId);
-        auto* invisible = dynamic_cast<InvisibleMan*>(&fighter);
-        if (!invisible) return;
-
-        auto tokens = invisible->getFogTokens();
-        if (fogIndex < 0 || fogIndex >= static_cast<int>(tokens.size())) {
-            throw RuleViolation("Invalid fog token index.");
-        }
-
-        int current = tokens[fogIndex];
-        auto occupiedByEnemy = [&](int spaceId) {
-            for (const auto& f : playerByIndex(pending.playerIndex == 0 ? 1 : 0).fighters()) {
-                if (!f->defeated() && f->spaceId() == spaceId) return true;
-            }
-            return false;
-        };
-        auto occupiedByAny = [&](int spaceId) {
-            return isSpaceOccupied(spaceId);
-        };
-
-        auto reachable = board_.reachableSpaces(current, pending.maxSteps, occupiedByEnemy, occupiedByAny);
-        if (!reachable.empty()) {
-            invisible->moveFogToken(fogIndex, reachable.front());
-        }
-    } catch (...) {
-        if (!undoStack_.empty()) undoStack_.pop_back();
-        throw;
+    auto reachable = board_.reachableSpaces(current, pending.maxSteps, occupiedByEnemy, occupiedByAny);
+    if (!reachable.empty()) {
+        invisible->moveFogToken(fogIndex, reachable.front());
     }
 }
 
-void GameController::queueFogChoice(int playerIndex, const std::string& fighterId, int maxSteps) {
+void GameController::queueFogChoice(int chooserPlayerIndex, const std::string& fighterId, int maxSteps) {
     if (maxSteps <= 0) return;
-    const Player& player = playerByIndex(playerIndex);
-    const Fighter& fighter = player.fighterById(fighterId);
-    if (fighter.defeated()) return;
+
+    int fighterOwnerIndex = -1;
+    for (int i = 0; i < static_cast<int>(players_.size()); ++i) {
+        for (const auto& f : players_[i].fighters()) {
+            if (f->id() == fighterId) {
+                fighterOwnerIndex = i;
+                break;
+            }
+        }
+        if (fighterOwnerIndex != -1) break;
+    }
+    if (fighterOwnerIndex == -1) return;
 
     PendingFogChoice choice;
-    choice.playerIndex = playerIndex;
+    choice.chooserPlayerIndex = chooserPlayerIndex;
+    choice.fighterOwnerIndex = fighterOwnerIndex;
     choice.fighterId = fighterId;
     choice.maxSteps = maxSteps;
     pendingFogChoices_.push_back(std::move(choice));
@@ -2006,7 +2027,8 @@ json GameController::createFullSnapshot() const {
     json pendingFogChoicesJson = json::array();
     for (const auto& fogChoice : pendingFogChoices_) {
         json entry;
-        entry["playerIndex"] = fogChoice.playerIndex;
+        entry["chooserPlayerIndex"] = fogChoice.chooserPlayerIndex;
+        entry["fighterOwnerIndex"] = fogChoice.fighterOwnerIndex;
         entry["fighterId"] = fogChoice.fighterId;
         entry["maxSteps"] = fogChoice.maxSteps;
         pendingFogChoicesJson.push_back(entry);
@@ -2116,7 +2138,8 @@ void GameController::restoreFullSnapshot(const json& j) {
     if (j.contains("pendingFogChoices")) {
         for (const auto& entry : j["pendingFogChoices"]) {
             PendingFogChoice choice;
-            choice.playerIndex = entry["playerIndex"].get<int>();
+            choice.chooserPlayerIndex = entry["chooserPlayerIndex"].get<int>();
+            choice.fighterOwnerIndex = entry["fighterOwnerIndex"].get<int>();
             choice.fighterId = entry["fighterId"].get<std::string>();
             choice.maxSteps = entry["maxSteps"].get<int>();
             pendingFogChoices_.push_back(choice);
@@ -2342,6 +2365,53 @@ void GameController::cancelRaveningScheme() {
     if (pendingRaveningChoice_.has_value()) {
         pendingRaveningChoice_.reset();
     }
+}
+
+std::vector<int> GameController::getReachableFogDestinations(int fogIndex) const {
+    if (!hasPendingFogChoice()) return {};
+    const auto& pending = pendingFogChoice();
+    const Fighter* fighter = findFighterById(pending.fighterId);
+    if (!fighter) return {};
+    const auto* invisible = dynamic_cast<const InvisibleMan*>(fighter);
+    if (!invisible) return {};
+    const auto& tokens = invisible->getFogTokens();
+    if (fogIndex < 0 || fogIndex >= static_cast<int>(tokens.size()) || tokens[fogIndex] == -1) return {};
+    
+    const Player* owner = ownerOfFighter(pending.fighterId);
+    if (!owner) return {};
+    
+    auto occupiedByEnemy = [&](int spaceId) {
+        for (const auto& f : opponentOf(*owner).fighters()) {
+            if (!f->defeated() && f->spaceId() == spaceId) return true;
+        }
+        return false;
+    };
+    auto occupiedByAny = [&](int spaceId) {
+        return isSpaceOccupied(spaceId);
+    };
+    return board_.reachableSpaces(tokens[fogIndex], pending.maxSteps, occupiedByEnemy, occupiedByAny);
+}
+
+void GameController::moveFogToken(int fogIndex, int destinationSpace) {
+    if (!hasPendingFogChoice()) {
+        throw RuleViolation("No pending fog choice.");
+    }
+    PendingFogChoice pending = pendingFogChoices_.front();
+    pendingFogChoices_.pop_front();
+
+    Player& owner = playerByIndex(pending.fighterOwnerIndex);
+    Fighter& fighter = owner.fighterById(pending.fighterId);
+    auto* invisible = dynamic_cast<InvisibleMan*>(&fighter);
+    if (!invisible) return;
+
+    const auto& tokens = invisible->getFogTokens();
+    if (fogIndex < 0 || fogIndex >= static_cast<int>(tokens.size()) || tokens[fogIndex] == -1) {
+        throw RuleViolation("Invalid fog token.");
+    }
+    if (!board_.contains(destinationSpace)) {
+        throw RuleViolation("Invalid destination space.");
+    }
+    invisible->moveFogToken(fogIndex, destinationSpace);
 }
 
 } // namespace unmatched

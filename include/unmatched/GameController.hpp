@@ -39,7 +39,8 @@ struct PendingMovementChoice {
 };
 
 struct PendingFogChoice {
-    int playerIndex = -1;
+    int chooserPlayerIndex = -1;
+    int fighterOwnerIndex = -1;
     std::string fighterId;
     int maxSteps = 0;
 };
@@ -186,6 +187,8 @@ public:
     bool hasPendingFogChoice() const;
     const PendingFogChoice& pendingFogChoice() const;
     std::vector<int> pendingFogChoices() const;
+    std::vector<int> getReachableFogDestinations(int fogIndex) const;
+    void moveFogToken(int fogIndex, int destinationSpace);
     void resolvePendingFogChoice(int fogIndex);
     void queueFogChoice(int playerIndex, const std::string& fighterId, int maxSteps);
 

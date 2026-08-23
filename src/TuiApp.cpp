@@ -149,8 +149,8 @@ Element TuiApp::renderStepLightlyTargetView() const {
     body.push_back(text("STEP LIGHTLY") | bold | color(Color::Yellow) | center);
     body.push_back(separator());
     body.push_back(text("Choose a target fighter:") | center);
-    for (const auto& id : pendingFighterIds_) {
-        body.push_back(menuLine(fighterMenuLabel(id), false));
+    for (size_t i = 0; i < pendingFighterIds_.size(); ++i) {
+        body.push_back(menuLine(fighterMenuLabel(pendingFighterIds_[i]), static_cast<int>(i) == selected_));
     }
     if (!errorMessage_.empty()) {
         body.push_back(text(errorMessage_) | color(Color::Red));
@@ -501,9 +501,21 @@ Element TuiApp::renderActionPanel() const {
         case ScreenState::DiscardToLimit:
             title = "Discard Cards";
             break;
-        case ScreenState::FogChoice:
-            title = "Choose a Fog Token to move";
+        case ScreenState::FogChoice: {
+            if (controller_.hasPendingFogChoice()) {
+                const auto& pending = controller_.pendingFogChoice();
+                const auto& players = controller_.players();
+                if (pending.chooserPlayerIndex >= 0 &&
+                    pending.chooserPlayerIndex < static_cast<int>(players.size())) {
+                    title = players[pending.chooserPlayerIndex].name() + " chooses a Fog Token to move";
+                } else {
+                    title = "Choose a Fog Token to move";
+                }
+            } else {
+                title = "Choose a Fog Token to move";
+            }
             break;
+        }
         case ScreenState::DraculaAbilityTarget:
             title = "Dracula Ability";
             break;
@@ -712,8 +724,20 @@ void TuiApp::handleEnter() {
                 showError("Invalid fog token selection.");
                 return;
             }
-            int fogIndex = pendingFogIndices_.at(selected_);
-            controller_.resolvePendingFogChoice(fogIndex);
+            selectedFogIndex_ = pendingFogIndices_[selected_];
+            openGameScreen();
+            break;
+        }
+
+        case ScreenState::FogDestination: {
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingFogDestinations_.size())) {
+                showError("Invalid destination.");
+                return;
+            }
+            int destination = pendingFogDestinations_[selected_];
+            controller_.moveFogToken(selectedFogIndex_, destination);
+            selectedFogIndex_ = -1;
+            pendingFogDestinations_.clear();
             openGameScreen();
             break;
         }
@@ -1311,6 +1335,14 @@ std::vector<std::string> TuiApp::currentMenuEntries() const {
             return entries;
         }
 
+        case ScreenState::StepLightlyTarget: {
+            std::vector<std::string> entries;
+            for (const auto& id : pendingFighterIds_) {
+                entries.push_back(fighterMenuLabel(id));
+            }
+            return entries;
+        }
+
         case ScreenState::ManeuverBoost: {
             std::vector<std::string> entries{"No boost"};
             for (int index : pendingCardIndexes_) {
@@ -1489,8 +1521,34 @@ std::vector<std::string> TuiApp::currentMenuEntries() const {
         }
         case ScreenState::FogChoice: {
             std::vector<std::string> entries;
-            for (int index : pendingFogIndices_) {
-                entries.push_back("Fog Token " + std::to_string(index + 1));
+            if (!controller_.hasPendingFogChoice()) return entries;
+            const auto& pending = controller_.pendingFogChoice();
+            const Player* owner = nullptr;
+            for (const auto& p : controller_.players()) {
+                for (const auto& f : p.fighters()) {
+                    if (f->id() == pending.fighterId) {
+                        owner = &p;
+                        break;
+                    }
+                }
+                if (owner) break;
+            }
+            if (!owner) return entries;
+            const Fighter* fighter = &owner->fighterById(pending.fighterId);
+            const auto* invisible = dynamic_cast<const InvisibleMan*>(fighter);
+            if (!invisible) return entries;
+            const auto& tokens = invisible->getFogTokens();
+            for (int idx : pendingFogIndices_) {
+                if (idx >= 0 && idx < static_cast<int>(tokens.size()) && tokens[idx] != -1) {
+                    entries.push_back("Fog Token " + std::to_string(idx + 1) + " (space " + std::to_string(tokens[idx]) + ")");
+                }
+            }
+            return entries;
+        }
+        case ScreenState::FogDestination: {
+            std::vector<std::string> entries;
+            for (int space : pendingFogDestinations_) {
+                entries.push_back(spaceMenuLabel(space));
             }
             return entries;
         }
@@ -1526,8 +1584,14 @@ void TuiApp::openGameScreen() {
     } else if (controller_.getConfoundSchemeCardIndex() != -1) {
         state_ = ScreenState::ConfoundChoice;
     } else if (controller_.hasPendingFogChoice()) {
-        pendingFogIndices_ = controller_.pendingFogChoices();
-        state_ = ScreenState::FogChoice;
+        if (selectedFogIndex_ == -1) {
+            pendingFogIndices_ = controller_.pendingFogChoices();
+            state_ = ScreenState::FogChoice;
+        } else {
+            pendingFogDestinations_ = controller_.getReachableFogDestinations(selectedFogIndex_);
+            state_ = ScreenState::FogDestination;
+        }
+        resetSelection();
     } else if (controller_.hasPendingConfoundChoice()) {
         auto* invisible = dynamic_cast<InvisibleMan*>(&controller_.currentPlayer().heroFighter());
         if (invisible) {
@@ -1594,6 +1658,7 @@ void TuiApp::startGameFromSetup() {
     selectedCodedNotesIndices_.clear();
     schemeChoice_ = SchemeChoice{};
     selectedFogIndex_ = -1;
+    pendingFogDestinations_.clear();
 
     std::remove("tui_state.json");
     

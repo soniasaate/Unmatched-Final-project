@@ -64,6 +64,7 @@ private:
         LurkingChoice,
         StepLightlyTarget,
         FogChoice,
+        FogDestination,
         LoadGame,
         GameOver,
     };
@@ -151,6 +152,7 @@ private:
     void saveTuiState() const;
     void loadTuiState();
     int selectedFogIndex_ = -1;
+    std::vector<int> pendingFogDestinations_;
 };
 
 } // namespace unmatched
