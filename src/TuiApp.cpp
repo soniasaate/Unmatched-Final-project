@@ -787,9 +787,12 @@ void TuiApp::handleEnter() {
                 return;
             }
             selectedFogIndex_ = pendingFogIndices_[selected_];
-            pendingSpaces_.clear();
-            for (const auto& space : controller_.board().spaces()) {
-                pendingSpaces_.push_back(space.id());
+            pendingSpaces_ = controller_.getValidConfoundDestinations(selectedFogIndex_);
+            if (pendingSpaces_.empty()) {
+                showError("No valid destinations for this fog token.");
+                state_ = ScreenState::ConfoundFogSelect;
+                resetSelection();
+                return;
             }
             state_ = ScreenState::ConfoundDestinationSelect;
             resetSelection();
@@ -1460,7 +1463,8 @@ std::vector<std::string> TuiApp::currentMenuEntries() const {
             if (invisible) {
                 const auto& tokens = invisible->getFogTokens();
                 for (int idx : pendingFogIndices_) {
-                    entries.push_back("Fog token " + std::to_string(idx + 1) + " (space " + std::to_string(tokens[idx]) + ")");
+                    entries.push_back("Fog token " + std::to_string(idx + 1) + 
+                                    " (space " + std::to_string(tokens[idx]) + ")");
                 }
             }
             return entries;

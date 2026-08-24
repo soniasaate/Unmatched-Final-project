@@ -34,6 +34,7 @@ struct SchemeChoice {
 struct PendingMovementChoice {
     int playerIndex = -1;
     std::string fighterId;
+    std::string defenderId;
     int maxSteps = 0;
     std::string source;
 };
@@ -43,6 +44,8 @@ struct PendingFogChoice {
     int fighterOwnerIndex = -1;
     std::string fighterId;
     int maxSteps = 0;
+    int excludedIndex = -1;
+    std::string source;
 };
 
 struct PendingConfoundChoice {
@@ -146,7 +149,8 @@ public:
 
     bool isSpaceOccupied(int spaceId) const;
     void drawCard(Player& player);
-    void queueOptionalMovement(int playerIndex, const std::string& fighterId, int maxSteps, const std::string& source);
+    void queueOptionalMovement(int playerIndex, const std::string& fighterId, int maxSteps,
+                               const std::string& source = "", const std::string& defenderId = "");
     int getRandomInt(int min, int max) {
         std::uniform_int_distribution<int> dist(min, max);
         return dist(random_);
@@ -194,13 +198,17 @@ public:
     std::vector<int> pendingFogChoices() const;
     std::vector<int> getReachableFogDestinations(int fogIndex) const;
     void moveFogToken(int fogIndex, int destinationSpace);
-    void queueFogChoice(int chooserPlayerIndex, const std::string& fighterId, int maxSteps);
+    void queueFogChoice(int chooserPlayerIndex, const std::string& fighterId, int maxSteps,
+                        int excludedIndex = -1, const std::string& source = "");
     void resolvePendingFogChoice(int fogIndex);
 
     bool hasPendingCodedNotes() const;
     const PendingCodedNotesChoice& pendingCodedNotes() const;
     void finishCodedNotes(const std::vector<int>& selectedIndices);
     void cancelCodedNotes();
+
+    std::vector<int> getValidConfoundDestinations(int fogIndex) const;
+    std::vector<int> getThirstDestinations(const std::string& defenderId) const;
 
 private:
     std::map<std::string, int> remainingMovementPoints_;
