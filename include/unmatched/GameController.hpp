@@ -57,6 +57,11 @@ struct PendingRaveningChoice {
     std::vector<std::string> movedFighters;
     std::map<std::string, int> newPositions;
 };
+
+struct PendingCodedNotesChoice {
+    int playerIndex = -1;
+};
+
 class GameController {
 public:
     GameController();
@@ -189,8 +194,13 @@ public:
     std::vector<int> pendingFogChoices() const;
     std::vector<int> getReachableFogDestinations(int fogIndex) const;
     void moveFogToken(int fogIndex, int destinationSpace);
+    void queueFogChoice(int chooserPlayerIndex, const std::string& fighterId, int maxSteps);
     void resolvePendingFogChoice(int fogIndex);
-    void queueFogChoice(int playerIndex, const std::string& fighterId, int maxSteps);
+
+    bool hasPendingCodedNotes() const;
+    const PendingCodedNotesChoice& pendingCodedNotes() const;
+    void finishCodedNotes(const std::vector<int>& selectedIndices);
+    void cancelCodedNotes();
 
 private:
     std::map<std::string, int> remainingMovementPoints_;
@@ -250,6 +260,7 @@ private:
     std::deque<PendingFogChoice> pendingFogChoices_;
     std::optional<PendingConfoundChoice> pendingConfoundChoice_;
     std::optional<PendingRaveningChoice> pendingRaveningChoice_;
+    std::optional<PendingCodedNotesChoice> pendingCodedNotesChoice_;
 
     std::vector<json> undoStack_;
     static constexpr size_t MAX_UNDO_STATES = 30;

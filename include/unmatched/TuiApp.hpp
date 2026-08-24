@@ -127,7 +127,7 @@ private:
     std::string errorMessage_;
     bool asciiOnlyMode_;
     bool waitingForDestination_;
-    std::set<size_t> selectedCodedNotesIndices_;
+    std::vector<int> selectedCodedNotesIndices_;
     int codedNotesCardIndex_ = -1;
     int lurkingCardIndex_ = -1;
     int stepLightlyCardIndex_ = -1;
