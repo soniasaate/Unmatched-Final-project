@@ -808,8 +808,31 @@ void TuiApp::handleEnter() {
             break;
 
         case ScreenState::LurkingChoice: {
-            controller_.handleLurking(lurkingCardIndex_, selected_);
-            lurkingCardIndex_ = -1;
+            if (selected_ == 0) {
+                controller_.resolveLurkingChoice(0);
+            } else if (selected_ == 1) {
+                controller_.resolveLurkingChoice(1);
+            } else {
+                controller_.cancelLurking();
+            }
+            openGameScreen();
+            break;
+        }
+        case ScreenState::LurkingFogSelect: {
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingFogIndices_.size())) {
+                showError("Invalid fog token selection.");
+                return;
+            }
+            controller_.resolveLurkingFogToken(pendingFogIndices_[selected_]);
+            openGameScreen();
+            break;
+        }
+        case ScreenState::LurkingDestination: {
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingSpaces_.size())) {
+                showError("Invalid destination.");
+                return;
+            }
+            controller_.resolveLurkingDestination(pendingSpaces_[selected_]);
             openGameScreen();
             break;
         }
@@ -1502,6 +1525,26 @@ std::vector<std::string> TuiApp::currentMenuEntries() const {
             for (int space : pendingFogDestinations_) entries.push_back(spaceMenuLabel(space));
             return entries;
         }
+        case ScreenState::LurkingChoice:
+            return {"Move Invisible Man to a Fog Space", "Move a Fog Token up to 3 spaces"};
+        case ScreenState::LurkingFogSelect: {
+            std::vector<std::string> entries;
+            const auto* invisible = dynamic_cast<const InvisibleMan*>(&controller_.currentPlayer().heroFighter());
+            if (invisible) {
+                const auto& tokens = invisible->getFogTokens();
+                for (int idx : pendingFogIndices_) {
+                    entries.push_back("Fog token " + std::to_string(idx + 1) + " (space " + std::to_string(tokens[idx]) + ")");
+                }
+            }
+            return entries;
+        }
+        case ScreenState::LurkingDestination: {
+            std::vector<std::string> entries;
+            for (int space : pendingSpaces_) {
+                entries.push_back(spaceMenuLabel(space));
+            }
+            return entries;
+        }
         case ScreenState::CodedNotesSelect: {
             std::vector<std::string> entries;
             const Player* player = nullptr;
@@ -1586,6 +1629,21 @@ void TuiApp::openGameScreen() {
     } else if (controller_.hasPendingOptionalMovement()) {
         pendingSpaces_ = controller_.pendingOptionalMovementDestinations();
         state_ = ScreenState::OptionalMovementDestination;
+    } else if (controller_.hasPendingLurking()) {
+        const auto& pending = controller_.pendingLurking();
+        if (pending.step == 0) {
+            state_ = ScreenState::LurkingChoice;
+        } else if (pending.step == 1 && pending.choice == 0) {
+            pendingSpaces_ = controller_.getLurkingOptions();
+            state_ = ScreenState::LurkingDestination;
+        } else if (pending.step == 1 && pending.choice == 1) {
+            pendingFogIndices_ = controller_.getLurkingFogTokens();
+            state_ = ScreenState::LurkingFogSelect;
+        } else if (pending.step == 2) {
+            pendingSpaces_ = controller_.getLurkingDestinations(pending.selectedFogIndex);
+            state_ = ScreenState::LurkingDestination;
+        }
+        resetSelection();
     } else if (controller_.currentPlayerMustDiscardToLimit()) {
         pendingCardIndexes_.clear();
         for (int i = 0; i < static_cast<int>(controller_.currentPlayer().hand().size()); ++i) {

@@ -61,6 +61,13 @@ struct PendingRaveningChoice {
     std::map<std::string, int> newPositions;
 };
 
+struct PendingLurkingChoice {
+    int playerIndex = -1;
+    int step = 0;
+    int selectedFogIndex = -1;
+    int choice = -1;
+};
+
 struct PendingCodedNotesChoice {
     int playerIndex = -1;
 };
@@ -206,6 +213,15 @@ public:
     const PendingCodedNotesChoice& pendingCodedNotes() const;
     void finishCodedNotes(const std::vector<int>& selectedIndices);
     void cancelCodedNotes();
+    bool hasPendingLurking() const;
+    const PendingLurkingChoice& pendingLurking() const;
+    std::vector<std::string> getLurkingOptions() const;
+    std::vector<int> getLurkingFogTokens() const;
+    std::vector<int> getLurkingDestinations(int fogIndex) const;
+    void resolveLurkingChoice(int choice);
+    void resolveLurkingFogToken(int fogIndex);
+    void resolveLurkingDestination(int destinationSpace);
+    void cancelLurking();
 
     std::vector<int> getValidConfoundDestinations(int fogIndex) const;
     std::vector<int> getThirstDestinations(const std::string& defenderId) const;
@@ -269,6 +285,7 @@ private:
     std::optional<PendingConfoundChoice> pendingConfoundChoice_;
     std::optional<PendingRaveningChoice> pendingRaveningChoice_;
     std::optional<PendingCodedNotesChoice> pendingCodedNotesChoice_;
+    std::optional<PendingLurkingChoice> pendingLurkingChoice_;
 
     std::vector<json> undoStack_;
     static constexpr size_t MAX_UNDO_STATES = 30;

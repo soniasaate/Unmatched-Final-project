@@ -65,6 +65,8 @@ private:
         StepLightlyTarget,
         FogChoice,
         FogDestination,
+        LurkingFogSelect,
+        LurkingDestination,
         LoadGame,
         GameOver,
     };

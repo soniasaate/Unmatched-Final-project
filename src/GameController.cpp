@@ -450,6 +450,16 @@ void GameController::resolveAttack(const std::string& attackerId,
         int attackValue = std::max(0, attackCard.getAttack()) + beastFormBonus;
         int defenseValue = defenseCard.has_value() ? std::max(0, defenseCard->getDefense()) : 0;
 
+        bool attackImpossible = false;
+        bool defenseImpossible = false;
+
+        if (attackCard.getTitle() == "IMPOSSIBLE TO SEE") {
+            defenseImpossible = true;
+        }
+        if (defenseCard.has_value() && defenseCard->getTitle() == "IMPOSSIBLE TO SEE") {
+            attackImpossible = true;
+        }
+
         if (defenseCard.has_value()) {
             auto* invisible = dynamic_cast<InvisibleMan*>(&defender);
             if (invisible && invisible->isOnFog(defender.spaceId())) {
@@ -494,6 +504,12 @@ void GameController::resolveAttack(const std::string& attackerId,
                     }
                 }
             }
+        }
+        if (attackImpossible) {
+            attackValue = 0;
+        }
+        if (defenseImpossible) {
+            defenseValue = 0;
         }
 
         int directDamage = std::max(0, attackValue - defenseValue);
@@ -1333,6 +1349,15 @@ void GameController::resolveCombatEffectAfterDamage(const Card& card,
             if (!adjacent.empty()) {
                 queueOptionalMovement(cardPlayer.id(), cardPlayer.heroFighter().id(), 1, "THIRST", opposingFighter.id());
             }
+        }
+        return;
+    }
+    if (title == "LURKING") {
+        if (dynamic_cast<InvisibleMan*>(&cardPlayer.heroFighter())) {
+            PendingLurkingChoice choice;
+            choice.playerIndex = cardPlayer.id();
+            choice.step = 0;
+            pendingLurkingChoice_ = choice;
         }
         return;
     }
@@ -2511,6 +2536,134 @@ std::map<int, int> GameController::computeReachableWithCost(int start, int maxSt
         }
     }
     return cost;
+}
+
+bool GameController::hasPendingLurking() const {
+    return pendingLurkingChoice_.has_value();
+}
+
+const PendingLurkingChoice& GameController::pendingLurking() const {
+    if (!pendingLurkingChoice_.has_value()) {
+        throw RuleViolation("No pending lurking choice.");
+    }
+    return *pendingLurkingChoice_;
+}
+
+std::vector<std::string> GameController::getLurkingOptions() const {
+    if (!pendingLurkingChoice_.has_value() || pendingLurkingChoice_->choice != 0) {
+        return {};
+    }
+    const Fighter& hero = currentPlayer().heroFighter();
+    const auto* invisible = dynamic_cast<const InvisibleMan*>(&hero);
+    if (!invisible) return {};
+
+    std::vector<std::string> result;
+    for (int fogSpace : invisible->getFogSpaces()) {
+        if (!isSpaceOccupied(fogSpace)) {
+            result.push_back(spaceMenuLabel(fogSpace));
+        }
+    }
+    return result;
+}
+
+std::vector<int> GameController::getLurkingFogTokens() const {
+    if (!pendingLurkingChoice_.has_value() || pendingLurkingChoice_->choice != 1) {
+        return {};
+    }
+    const Fighter& hero = currentPlayer().heroFighter();
+    const auto* invisible = dynamic_cast<const InvisibleMan*>(&hero);
+    if (!invisible) return {};
+
+    std::vector<int> result;
+    for (int i = 0; i < 3; ++i) {
+        if (invisible->getFogTokens()[i] != -1) {
+            result.push_back(i);
+        }
+    }
+    return result;
+}
+
+std::vector<int> GameController::getLurkingDestinations(int fogIndex) const {
+    if (!pendingLurkingChoice_.has_value() || pendingLurkingChoice_->choice != 1) {
+        return {};
+    }
+    const Fighter& hero = currentPlayer().heroFighter();
+    const auto* invisible = dynamic_cast<const InvisibleMan*>(&hero);
+    if (!invisible) return {};
+    const auto& tokens = invisible->getFogTokens();
+    if (fogIndex < 0 || fogIndex >= 3 || tokens[fogIndex] == -1) return {};
+
+    auto noObstacle = [&](int) { return false; };
+    auto reachable = board_.reachableSpaces(tokens[fogIndex], 3, noObstacle, noObstacle);
+    reachable.erase(std::remove(reachable.begin(), reachable.end(), tokens[fogIndex]), reachable.end());
+    for (int i = 0; i < 3; ++i) {
+        if (i == fogIndex) continue;
+        if (tokens[i] != -1) {
+            reachable.erase(std::remove(reachable.begin(), reachable.end(), tokens[i]), reachable.end());
+        }
+    }
+    return reachable;
+}
+
+void GameController::resolveLurkingChoice(int choice) {
+    if (!pendingLurkingChoice_.has_value()) {
+        throw RuleViolation("No pending lurking choice.");
+    }
+    pendingLurkingChoice_->choice = choice;
+    if (choice == 0) {
+        pendingLurkingChoice_->step = 1;
+    } else if (choice == 1) {
+        pendingLurkingChoice_->step = 1;
+    } else {
+        throw RuleViolation("Invalid choice.");
+    }
+}
+
+void GameController::resolveLurkingFogToken(int fogIndex) {
+    if (!pendingLurkingChoice_.has_value() || pendingLurkingChoice_->choice != 1) {
+        throw RuleViolation("Invalid state for lurking fog token.");
+    }
+    pendingLurkingChoice_->selectedFogIndex = fogIndex;
+    pendingLurkingChoice_->step = 2;
+}
+
+void GameController::resolveLurkingDestination(int destinationSpace) {
+    if (!pendingLurkingChoice_.has_value()) {
+        throw RuleViolation("No pending lurking choice.");
+    }
+
+    Player& player = currentPlayer();
+    Fighter& hero = player.heroFighter();
+    auto* invisible = dynamic_cast<InvisibleMan*>(&hero);
+    if (!invisible) throw RuleViolation("Current player is not Invisible Man.");
+
+    if (pendingLurkingChoice_->choice == 0) {
+        auto options = getLurkingOptions();
+        if (std::find(options.begin(), options.end(), destinationSpace) == options.end()) {
+            throw RuleViolation("Invalid destination for lurking.");
+        }
+        invisible->placeAt(destinationSpace);
+    } else if (pendingLurkingChoice_->choice == 1) {
+        int fogIndex = pendingLurkingChoice_->selectedFogIndex;
+        auto destinations = getLurkingDestinations(fogIndex);
+        if (std::find(destinations.begin(), destinations.end(), destinationSpace) == destinations.end()) {
+            throw RuleViolation("Invalid destination for fog token.");
+        }
+        invisible->moveFogToken(fogIndex, destinationSpace);
+    } else {
+        throw RuleViolation("Invalid lurking choice.");
+    }
+
+    pendingLurkingChoice_.reset();
+    --actionsRemaining_;
+    endTurnIfNeeded();
+}
+
+void GameController::cancelLurking() {
+    if (pendingLurkingChoice_.has_value()) {
+        pendingLurkingChoice_.reset();
+        endTurnIfNeeded();
+    }
 }
 
 } // namespace unmatched

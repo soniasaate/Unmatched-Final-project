@@ -322,10 +322,7 @@ std::vector<Card> DeckFactory::createDeckForInvisibleMan() const {
         });
 
     addCopies(2, "IMPOSSIBLE TO SEE", Character::InvisibleMan, CardType::Versatile, 2, 2, 2, Timing::Immediately,
-        [](Fighter&, Fighter&, GameController&, int& attackValue, int& defenseValue) {
-            attackValue = 0;
-            defenseValue = 0;
-        });
+        [](Fighter&, Fighter&, GameController&, int&, int&) {});
 
    addCopies(2, "INTO THIN AIR", Character::InvisibleMan, CardType::Defense, -1, 4, 1, Timing::AfterCombat,
         [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
