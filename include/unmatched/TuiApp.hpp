@@ -62,11 +62,15 @@ private:
         RaveningDestination,
         RaveningContinue,
         LurkingChoice,
+        LurkingFogSelect,
+        LurkingDestination,
+        SlipAwayFogSelect,
+        SlipAwayDestination,
+        RollingFogSelect,
+        RollingFogDestination,
         StepLightlyTarget,
         FogChoice,
         FogDestination,
-        LurkingFogSelect,
-        LurkingDestination,
         LoadGame,
         GameOver,
     };
@@ -131,7 +135,6 @@ private:
     bool waitingForDestination_;
     std::vector<int> selectedCodedNotesIndices_;
     int codedNotesCardIndex_ = -1;
-    int lurkingCardIndex_ = -1;
     int stepLightlyCardIndex_ = -1;
     std::vector<int> pendingFogIndices_;
     std::string selectedRaveningFighterId_;

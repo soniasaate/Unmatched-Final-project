@@ -89,17 +89,7 @@ std::vector<Card> DeckFactory::createDeckForDracula() const {
         });
 
     addCopies(2, "MISTFORM", Character::Dracula, CardType::Scheme, -1, -1, 2, Timing::None,
-        [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
-            auto* dracula = dynamic_cast<Dracula*>(&attacker);
-            if (!dracula) return;
-            for (const auto& space : controller.board().spaces()) {
-                if (!controller.isSpaceOccupied(space.id())) {
-                    dracula->placeAt(space.id());
-                    controller.addAction(1);
-                    break;
-                }
-            }
-        });
+        nullptr);
 
     addCopies(2, "AMBUSH", Character::Any, CardType::Attack, 2, -1, 3, Timing::Immediately,
         [](Fighter&, Fighter&, GameController& controller, int& attackValue, int&) {
@@ -129,17 +119,10 @@ std::vector<Card> DeckFactory::createDeckForDracula() const {
             }
         });
 
-    addCopies(2, "BEASTFORM", Character::Dracula, CardType::Attack, 6, -1, 4, Timing::DuringCombat,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
-
-    addCopies(3, "DASH", Character::Any, CardType::Versatile, 3, 3, 1, Timing::AfterCombat,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
-
-    addCopies(3, "EXPLOIT", Character::Any, CardType::Versatile, 4, 4, 1, Timing::AfterCombat,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
-
-    addCopies(3, "LOOK INTO MY EYES", Character::Dracula, CardType::Defense, -1, 1, 2, Timing::DuringCombat,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
+    addCopies(2, "BEASTFORM", Character::Dracula, CardType::Attack, 6, -1, 4, Timing::DuringCombat, nullptr);
+    addCopies(3, "DASH", Character::Any, CardType::Versatile, 3, 3, 1, Timing::AfterCombat, nullptr);
+    addCopies(3, "EXPLOIT", Character::Any, CardType::Versatile, 4, 4, 1, Timing::AfterCombat, nullptr);
+    addCopies(3, "LOOK INTO MY EYES", Character::Dracula, CardType::Defense, -1, 1, 2, Timing::DuringCombat, nullptr);
 
     addCopies(2, "PREY UPON", Character::Dracula, CardType::Scheme, -1, -1, 4, Timing::None,
         [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
@@ -156,14 +139,9 @@ std::vector<Card> DeckFactory::createDeckForDracula() const {
             dracula->heal(healed);
         });
 
-    addCopies(3, "RAVENING SEDUCTION", Character::Sister, CardType::Scheme, -1, -1, 2, Timing::None,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
-
-    addCopies(3, "THIRST FOR SUSTENANCE", Character::Sister, CardType::Attack, 3, -1, 3, Timing::AfterCombat,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
-
-    addCopies(3, "FEINT", Character::Any, CardType::Versatile, 2, 2, 2, Timing::Immediately,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
+    addCopies(3, "RAVENING SEDUCTION", Character::Sister, CardType::Scheme, -1, -1, 2, Timing::None, nullptr);
+    addCopies(3, "THIRST FOR SUSTENANCE", Character::Sister, CardType::Attack, 3, -1, 3, Timing::AfterCombat, nullptr);
+    addCopies(3, "FEINT", Character::Any, CardType::Versatile, 2, 2, 2, Timing::Immediately, nullptr);
 
     return deck;
 }
@@ -185,44 +163,15 @@ std::vector<Card> DeckFactory::createDeckForSherlock() const {
         }
     };
 
-    addCopies(2, "ADMINISTER AID", Character::Watson, CardType::Scheme, -1, -1, 2, Timing::None,
-        [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
-            auto* sherlock = dynamic_cast<Sherlock*>(&attacker);
-            if (!sherlock) return;
-            Fighter& watson = sherlock->getWatson();
-            if (watson.defeated()) return;
-            auto adjacent = controller.board().freeAdjacentSpaces(sherlock->spaceId(), 
-                [&](int spaceId) { return controller.isSpaceOccupied(spaceId); });
-            if (!adjacent.empty()) {
-                watson.placeAt(adjacent.front());
-                sherlock->heal(1);
-                controller.drawCard(controller.currentPlayer());
-            }
-        });
-
-    addCopies(3, "CONFIRM SUSPICION", Character::Sherlock, CardType::Scheme, -1, -1, 1, Timing::None,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
-
-    addCopies(3, "COUNTERPUNCH", Character::Sherlock, CardType::Versatile, 3, 3, 1, Timing::AfterCombat,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
-
-    addCopies(3, "DEDUCE STRATEGY", Character::Sherlock, CardType::Versatile, 3, 3, 1, Timing::DuringCombat,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
-
-    addCopies(2, "EDUCATION NEVER ENDS", Character::Any, CardType::Versatile, 3, 3, 1, Timing::AfterCombat,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
-
-    addCopies(2, "ELEMENTARY", Character::Sherlock, CardType::Defense, -1, 3, 3, Timing::DuringCombat,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
-
-    addCopies(2, "ELIMINATE THE IMPOSSIBLE", Character::Sherlock, CardType::Scheme, -1, -1, 2, Timing::None,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
-
-    addCopies(3, "FEINT", Character::Any, CardType::Versatile, 2, 2, 1, Timing::Immediately,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
-
-    addCopies(2, "FIXED POINT IN A CHANGING AGE", Character::Watson, CardType::Versatile, 3, 3, 1, Timing::AfterCombat,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
+    addCopies(2, "ADMINISTER AID", Character::Watson, CardType::Scheme, -1, -1, 2, Timing::None, nullptr);
+    addCopies(3, "CONFIRM SUSPICION", Character::Sherlock, CardType::Scheme, -1, -1, 1, Timing::None, nullptr);
+    addCopies(3, "COUNTERPUNCH", Character::Sherlock, CardType::Versatile, 3, 3, 1, Timing::AfterCombat, nullptr);
+    addCopies(3, "DEDUCE STRATEGY", Character::Sherlock, CardType::Versatile, 3, 3, 1, Timing::DuringCombat, nullptr);
+    addCopies(2, "EDUCATION NEVER ENDS", Character::Any, CardType::Versatile, 3, 3, 1, Timing::AfterCombat, nullptr);
+    addCopies(2, "ELEMENTARY", Character::Sherlock, CardType::Defense, -1, 3, 3, Timing::DuringCombat, nullptr);
+    addCopies(2, "ELIMINATE THE IMPOSSIBLE", Character::Sherlock, CardType::Scheme, -1, -1, 2, Timing::None, nullptr);
+    addCopies(3, "FEINT", Character::Any, CardType::Versatile, 2, 2, 1, Timing::Immediately, nullptr);
+    addCopies(2, "FIXED POINT IN A CHANGING AGE", Character::Watson, CardType::Versatile, 3, 3, 1, Timing::AfterCombat, nullptr);
 
     addCopies(2, "MASTER OF DISGUISE", Character::Sherlock, CardType::Scheme, -1, -1, 2, Timing::None,
         [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
@@ -241,14 +190,9 @@ std::vector<Card> DeckFactory::createDeckForSherlock() const {
             opponentHero.damage(1);
         });
 
-    addCopies(2, "THE GAME IS AFOOT", Character::Sherlock, CardType::Attack, 5, -1, 2, Timing::AfterCombat,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
-
-    addCopies(2, "SERVICE REVOLVER", Character::Watson, CardType::Attack, 5, -1, 3, Timing::None,
-        nullptr);
-
-    addCopies(2, "STUDY METHODS", Character::Any, CardType::Versatile, 3, 3, 2, Timing::AfterCombat,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
+    addCopies(2, "THE GAME IS AFOOT", Character::Sherlock, CardType::Attack, 5, -1, 2, Timing::AfterCombat, nullptr);
+    addCopies(2, "SERVICE REVOLVER", Character::Watson, CardType::Attack, 5, -1, 3, Timing::None, nullptr);
+    addCopies(2, "STUDY METHODS", Character::Any, CardType::Versatile, 3, 3, 2, Timing::AfterCombat, nullptr);
 
     return deck;
 }
@@ -270,11 +214,8 @@ std::vector<Card> DeckFactory::createDeckForInvisibleMan() const {
         }
     };
 
-    addCopies(2, "CODED NOTES", Character::InvisibleMan, CardType::Defense, -1, 3, 2, Timing::AfterCombat,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
-
-    addCopies(2, "CONFOUND", Character::InvisibleMan, CardType::Versatile, 3, 3, 2, Timing::AfterCombat,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
+    addCopies(2, "CODED NOTES", Character::InvisibleMan, CardType::Defense, -1, 3, 2, Timing::AfterCombat, nullptr);
+    addCopies(2, "CONFOUND", Character::InvisibleMan, CardType::Versatile, 3, 3, 2, Timing::AfterCombat, nullptr);
 
     addCopies(3, "COVERT PREPARATION", Character::InvisibleMan, CardType::Versatile, 2, 2, 1, Timing::AfterCombat,
         [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
@@ -282,7 +223,6 @@ std::vector<Card> DeckFactory::createDeckForInvisibleMan() const {
             if (owner) {
                 controller.drawCard(const_cast<Player&>(*owner));
             }
-
             auto* invisible = dynamic_cast<InvisibleMan*>(&attacker);
             if (!invisible) return;
 
@@ -321,10 +261,9 @@ std::vector<Card> DeckFactory::createDeckForInvisibleMan() const {
             }
         });
 
-    addCopies(2, "IMPOSSIBLE TO SEE", Character::InvisibleMan, CardType::Versatile, 2, 2, 2, Timing::Immediately,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
+    addCopies(2, "IMPOSSIBLE TO SEE", Character::InvisibleMan, CardType::Versatile, 2, 2, 2, Timing::Immediately, nullptr);
 
-   addCopies(2, "INTO THIN AIR", Character::InvisibleMan, CardType::Defense, -1, 4, 1, Timing::AfterCombat,
+    addCopies(2, "INTO THIN AIR", Character::InvisibleMan, CardType::Defense, -1, 4, 1, Timing::AfterCombat,
         [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
             auto* invisible = dynamic_cast<InvisibleMan*>(&attacker);
             if (!invisible) return;
@@ -332,44 +271,10 @@ std::vector<Card> DeckFactory::createDeckForInvisibleMan() const {
             if (owner) {
                 controller.queueOptionalMovement(owner->id(), attacker.id(), 1, "INTO THIN AIR");
             }
-            for (int i = 0; i < 3; ++i) {
-                if (invisible->getFogTokens()[i] != -1) {
-                    int current = invisible->getFogTokens()[i];
-                    auto occupiedByEnemy = [&](int spaceId) {
-                        for (const auto& fighter : controller.opponentPlayer().fighters()) {
-                            if (!fighter->defeated() && fighter->spaceId() == spaceId) return true;
-                        }
-                        return false;
-                    };
-                    auto occupiedByAny = [&](int spaceId) {
-                        return controller.isSpaceOccupied(spaceId);
-                    };
-                    auto reachable = controller.board().reachableSpaces(current, 3, occupiedByEnemy, occupiedByAny);
-                    if (!reachable.empty()) {
-                        invisible->moveFogToken(i, reachable.front());
-                        return;
-                    }
-                }
-            }
+            controller.queueFogChoice(controller.currentPlayer().id(), invisible->id(), 3, -1, "INTO THIN AIR");
         });
 
-    addCopies(2, "LURKING", Character::InvisibleMan, CardType::Defense, -1, 2, 2, Timing::AfterCombat,
-        [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
-            controller.drawCard(controller.currentPlayer());
-            auto* invisible = dynamic_cast<InvisibleMan*>(&attacker);
-            if (!invisible) return;
-            for (int i = 0; i < 3; ++i) {
-                if (invisible->getFogTokens()[i] != -1) {
-                    int current = invisible->getFogTokens()[i];
-                    for (const auto& space : controller.board().spaces()) {
-                        if (space.id() != current) {
-                            invisible->moveFogToken(i, space.id());
-                            return;
-                        }
-                    }
-                }
-            }
-        });
+    addCopies(2, "LURKING", Character::InvisibleMan, CardType::Defense, -1, 2, 2, Timing::AfterCombat, nullptr);
 
     addCopies(2, "REIGN OF TERROR", Character::InvisibleMan, CardType::Scheme, -1, -1, 1, Timing::None,
         [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
@@ -383,46 +288,10 @@ std::vector<Card> DeckFactory::createDeckForInvisibleMan() const {
             }
         });
 
-    addCopies(2, "ROLLING FOG", Character::InvisibleMan, CardType::Scheme, -1, -1, 1, Timing::None,
-        [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
-            auto* invisible = dynamic_cast<InvisibleMan*>(&attacker);
-            if (!invisible) return;
-            for (int i = 0; i < 3; ++i) {
-                if (invisible->getFogTokens()[i] != -1) {
-                    int current = invisible->getFogTokens()[i];
-                    for (const auto& space : controller.board().spaces()) {
-                        if (space.id() != current) {
-                            invisible->moveFogToken(i, space.id());
-                            controller.addAction(1);
-                            return;
-                        }
-                    }
-                }
-            }
-        });
-
-    addCopies(3, "SLIP AWAY", Character::InvisibleMan, CardType::Attack, 3, -1, 2, Timing::AfterCombat,
-        [](Fighter& attacker, Fighter&, GameController& controller, int&, int&) {
-            auto* invisible = dynamic_cast<InvisibleMan*>(&attacker);
-            if (!invisible) return;
-            for (int i = 0; i < 3; ++i) {
-                if (invisible->getFogTokens()[i] == attacker.spaceId()) {
-                    for (const auto& space : controller.board().spaces()) {
-                        if (!controller.isSpaceOccupied(space.id()) && space.id() != attacker.spaceId()) {
-                            invisible->moveFogToken(i, space.id());
-                            attacker.placeAt(space.id());
-                            return;
-                        }
-                    }
-                }
-            }
-        });
-
-    addCopies(2, "STEP LIGHTLY", Character::InvisibleMan, CardType::Scheme, -1, -1, 1, Timing::None,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
-        
-    addCopies(2, "VANISH", Character::InvisibleMan, CardType::Scheme, -1, -1, 3, Timing::None,
-        [](Fighter&, Fighter&, GameController&, int&, int&) {});
+    addCopies(2, "ROLLING FOG", Character::InvisibleMan, CardType::Scheme, -1, -1, 1, Timing::None, nullptr);
+    addCopies(3, "SLIP AWAY", Character::InvisibleMan, CardType::Attack, 3, -1, 2, Timing::AfterCombat, nullptr);
+    addCopies(2, "STEP LIGHTLY", Character::InvisibleMan, CardType::Scheme, -1, -1, 1, Timing::None, nullptr);
+    addCopies(2, "VANISH", Character::InvisibleMan, CardType::Scheme, -1, -1, 3, Timing::None, nullptr);
         
     return deck;
 }

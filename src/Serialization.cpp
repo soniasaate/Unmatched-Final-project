@@ -119,22 +119,15 @@ std::unique_ptr<Fighter> jsonToFighter(const json& j) {
 }
 
 int findEmptySlot() {
-    for (int i = 1; i <= 3; ++i) {
-        std::string filename = "save" + std::to_string(i) + ".json";
-        if (!fs::exists(filename)) {
-            return i;
-        }
+    if (fs::exists("save2.json")) {
+        std::error_code ec;
+        fs::rename("save2.json", "save3.json", ec);
     }
     if (fs::exists("save1.json")) {
-        fs::remove("save1.json");
+        std::error_code ec;
+        fs::rename("save1.json", "save2.json", ec);
     }
-    if (fs::exists("save2.json")) {
-        fs::rename("save2.json", "save1.json");
-    }
-    if (fs::exists("save3.json")) {
-        fs::rename("save3.json", "save2.json");
-    }
-    return 3;
+    return 1;
 }
 
 } // namespace unmatched

@@ -75,7 +75,7 @@ ftxui::Color fighterColor(const Fighter& fighter) {
     return ftxui::Color::White;
 }
 
-}  // namespace
+}
 
 using namespace ftxui;
 
@@ -104,6 +104,7 @@ Element TuiApp::Render() {
         case ScreenState::SetupAge:
             return renderSetupAge();
         case ScreenState::FighterSelect:
+        case ScreenState::FighterSelectSecond:
             return renderFighterSelect();
         case ScreenState::StartSelect:
             return renderStartSelect();
@@ -197,8 +198,7 @@ Element TuiApp::renderCodedNotesView() const {
     Elements body;
     body.push_back(text("CODED NOTES") | bold | color(Color::Yellow) | center);
     body.push_back(separator());
-    body.push_back(text("Draw 3 cards, then select 2 cards to put on top of your deck.") | center);
-    body.push_back(text("Select 2 cards from your hand (use Arrow keys and Enter):") | center);
+    body.push_back(text("Select 2 cards to place back on top of your deck:") | center);
     body.push_back(separator());
 
     const Player* player = nullptr;
@@ -214,7 +214,6 @@ Element TuiApp::renderCodedNotesView() const {
         body.push_back(text("(no cards in hand)") | color(Color::Red) | center);
     } else {
         for (size_t i = 0; i < player->hand().size(); ++i) {
-            if (codedNotesCardIndex_ != -1 && static_cast<int>(i) == codedNotesCardIndex_) continue;
             bool isSelected = (std::find(selectedCodedNotesIndices_.begin(), selectedCodedNotesIndices_.end(), static_cast<int>(i)) != selectedCodedNotesIndices_.end());
             std::string prefix = isSelected ? "[X] " : "[ ] ";
             body.push_back(menuLine(prefix + player->hand()[i].getTitle(), displayIndex == selected_));
@@ -225,7 +224,6 @@ Element TuiApp::renderCodedNotesView() const {
     body.push_back(separator());
     std::string confirmLabel = "Confirm selection (" + std::to_string(selectedCodedNotesIndices_.size()) + "/2 selected)";
     body.push_back(menuLine(confirmLabel, selected_ == displayIndex));
-    body.push_back(menuLine("Cancel", selected_ == displayIndex + 1));
 
     return vbox(std::move(body)) | border | center | size(WIDTH, GREATER_THAN, 60);
 }
@@ -247,39 +245,58 @@ bool TuiApp::OnEvent(Event event) {
     try {
         if (event == Event::Character("s") || event == Event::Character("S")) {
             if (controller_.started() && !controller_.gameOver()) {
-                controller_.saveGame();
+                int slot = controller_.getSaveSlots().empty() ? 1 : findEmptySlot();
+                controller_.saveGame(slot);
                 saveTuiState();
-                showError("Game saved successfully!");
+                showError("Game saved successfully in slot " + std::to_string(slot) + "!");
+                return true;
+            }
+            return true;
+        }
+        if (event == Event::Character("e") || event == Event::Character("E")) {
+            if (controller_.started() && !controller_.gameOver()) {
+                int slot = controller_.getSaveSlots().empty() ? 1 : findEmptySlot();
+                controller_.saveGame(slot);
+                saveTuiState();
+                state_ = ScreenState::MainMenu;
+                resetSelection();
+                showError("Game saved and exited to main menu.");
                 return true;
             }
             return true;
         }
         if (event == Event::Character("z") || event == Event::Character("Z")) {
-            if (controller_.canUndo()) {
-                try {
-                    controller_.undoLastAction();
-                    selectedSchemeCardIndex_ = -1;
-                    openGameScreen();
-                    showError("Undo successful.");
-                } catch (const std::exception& e) {
-                    showError(std::string("Undo failed: ") + e.what());
+            if (controller_.started() && !controller_.gameOver()) {
+                if (state_ != ScreenState::Game) {
+                    state_ = ScreenState::Game;
+                    resetSelection();
+                    showError("Action canceled.");
+                    return true;
                 }
-            } else {
-                showError("Nothing to undo.");
+                if (controller_.canUndo()) {
+                    try {
+                        controller_.undoLastAction();
+                        selectedSchemeCardIndex_ = -1;
+                        openGameScreen();
+                        showError("Undo successful.");
+                    } catch (const std::exception& e) {
+                        showError(std::string("Undo failed: ") + e.what());
+                    }
+                } else {
+                    showError("Cannot undo: start of turn reached or action already resolved.");
+                }
+                return true;
             }
             return true;
         }
         if (event == Event::Character("l") || event == Event::Character("L")) {
-            if (!controller_.started() || controller_.gameOver()) {
-                auto slots = controller_.getSaveSlots();
-                if (!slots.empty()) {
-                    pendingSlots_ = slots;
-                    state_ = ScreenState::LoadGame;
-                    resetSelection();
-                    return true;
-                }
+            auto slots = controller_.getSaveSlots();
+            if (!slots.empty()) {
+                pendingSlots_ = slots;
+                state_ = ScreenState::LoadGame;
+                resetSelection();
+            } else {
                 showError("No save files found.");
-                return true;
             }
             return true;
         }
@@ -295,10 +312,10 @@ bool TuiApp::OnEvent(Event event) {
 
 Element TuiApp::renderMainMenu() const {
     Elements body;
-    body.push_back(text("UNMATCHED TUI - Dracula vs Sherlock Holmes") | bold | center);
+    body.push_back(text("UNMATCHED TUI") | bold | center);
     body.push_back(separator());
     body.push_back(text("Baskerville Manor duel simulator") | center);
-    body.push_back(text("Use Arrow keys and Enter. Main menu requires no typed commands.") | dim | center);
+    body.push_back(text("Shortcuts: [S] Save  [L] Load  [Z] Undo  [Q] Exit") | dim | center);
     body.push_back(separator());
     body.push_back(renderMenuLines(currentMenuEntries(), "Main Menu"));
     if (!errorMessage_.empty()) {
@@ -310,17 +327,16 @@ Element TuiApp::renderMainMenu() const {
 
 Element TuiApp::renderHelp() const {
     Elements rules;
-    rules.push_back(text("How to play") | bold | color(Color::Yellow));
-    rules.push_back(text("1. The younger player chooses a fighter; the other fighter is assigned automatically."));
-    rules.push_back(text("2. The younger player chooses start space 1 or 2; the opponent starts on the remaining space."));
-    rules.push_back(text("3. Each player shuffles a 30-card deck and draws 5 cards."));
-    rules.push_back(text("4. On your turn you must take exactly 2 actions: Maneuver, Attack, or Scheme."));
-    rules.push_back(text("5. Maneuver draws 1 card, then may boost and move fighters through connected spaces."));
-    rules.push_back(text("6. Melee attacks adjacent enemies. Ranged attacks adjacent enemies or enemies sharing a zone."));
-    rules.push_back(text("7. Secret passages count as movement neighbors only; they are not combat adjacency."));
-    rules.push_back(text("8. At end of turn discard down to 7 cards. Reduce the enemy hero to 0 HP to win."));
+    rules.push_back(text("How to Play & Shortcuts") | bold | color(Color::Yellow));
     rules.push_back(separator());
-    rules.push_back(renderMenuLines(currentMenuEntries(), controller_.started() ? "Return" : "Return"));
+    rules.push_back(text("1. Younger player chooses a fighter and start slot (1 or 2)."));
+    rules.push_back(text("2. Exactly 2 actions per turn: Maneuver, Attack, or Scheme."));
+    rules.push_back(text("3. Shortcut [S]: Save current game instantly at any moment."));
+    rules.push_back(text("4. Shortcut [E]: Save game and exit to the main menu."));
+    rules.push_back(text("5. Shortcut [Z]: Undo current character's actions within the turn."));
+    rules.push_back(text("6. Shortcut [L]: Load game from available save slots."));
+    rules.push_back(separator());
+    rules.push_back(renderMenuLines(currentMenuEntries(), "Return"));
     if (!errorMessage_.empty()) {
         rules.push_back(text(errorMessage_) | color(Color::Red));
     }
@@ -346,7 +362,7 @@ Element TuiApp::renderFighterSelect() const {
     Elements body;
     body.push_back(text("Fighter Selection") | bold | color(Color::Yellow));
     body.push_back(separator());
-    body.push_back(text("The younger player chooses first. The remaining fighter is assigned automatically."));
+    body.push_back(text("Choose your fighter:"));
     body.push_back(renderMenuLines(currentMenuEntries(), "Choose Fighter"));
     if (!errorMessage_.empty()) {
         body.push_back(separator());
@@ -372,16 +388,16 @@ Element TuiApp::renderGame() const {
     if (!controller_.started()) return renderMainMenu();
     const auto& players = controller_.players();
     Elements page;
-    std::string title = "UNMATCHED TUI - Dracula vs Sherlock Holmes";
+    std::string title = "UNMATCHED TUI";
     page.push_back(text(title) | bold | center);
     const Fighter& hero = controller_.currentPlayer().heroFighter();
     page.push_back(text("Turn " + std::to_string(controller_.turnNumber()) + " - " +
-                    controller_.currentPlayer().name() + " / " +
-                    fighterTypeName(hero) +
-                    " - Actions: " + std::to_string(controller_.actionsRemaining()) +
-                    " - Moves: " + std::to_string(controller_.pendingMovementPoints()) + "/" +
-                    std::to_string(controller_.maxMovementPoints())) |
-               color(fighterColor(hero)) | center);
+                        controller_.currentPlayer().name() + " / " +
+                        fighterTypeName(hero) +
+                        " - Actions: " + std::to_string(controller_.actionsRemaining()) +
+                        " - Moves: " + std::to_string(controller_.pendingMovementPoints()) + "/" +
+                        std::to_string(controller_.maxMovementPoints())) |
+                   color(fighterColor(hero)) | center);
     page.push_back(separator());
     page.push_back(hbox({
         renderPlayerPanel(players.at(0), controller_.currentPlayerIndex() == 0) | size(WIDTH, EQUAL, 34 ),
@@ -395,10 +411,10 @@ Element TuiApp::renderGame() const {
         renderHandPanel(players.at(1), controller_.currentPlayerIndex() == 1) | size(WIDTH, EQUAL, 42),
     }));
     page.push_back(separator());
-    page.push_back(text("Zones: b=blue  r=brown  p=purple  y=yellow  g=green  d=dark-blue  e=grey") | dim | center);
+    page.push_back(text("Zones: b=blue  r=brown  p=purple  y=yellow  g=green  d=dark-blue  e=grey | Shortcuts: [S] Save [L] Load [Z] Undo") | dim | center);
     if (!errorMessage_.empty()) {
         page.push_back(separator());
-        page.push_back(text("Error: " + errorMessage_) | color(Color::Red) | bold | center);
+        page.push_back(text("Notice: " + errorMessage_) | color(Color::Yellow) | bold | center);
     }
     return vbox(std::move(page));
 }
@@ -496,26 +512,26 @@ Element TuiApp::renderActionPanel() const {
         case ScreenState::DiscardToLimit:
             title = "Discard Cards";
             break;
-        case ScreenState::FogChoice: {
-            if (controller_.hasPendingFogChoice()) {
-                const auto& pending = controller_.pendingFogChoice();
-                const auto& players = controller_.players();
-                if (pending.chooserPlayerIndex >= 0 &&
-                    pending.chooserPlayerIndex < static_cast<int>(players.size())) {
-                    title = players[pending.chooserPlayerIndex].name() + " chooses a Fog Token to move";
-                } else {
-                    title = "Choose a Fog Token to move";
-                }
-            } else {
-                title = "Choose a Fog Token to move";
-            }
+        case ScreenState::FogChoice:
+            title = "Choose a Fog Token to move";
             break;
-        }
         case ScreenState::FogDestination:
             title = "Choose destination for Fog Token";
             break;
         case ScreenState::DraculaAbilityTarget:
             title = "Dracula Ability";
+            break;
+        case ScreenState::SlipAwayFogSelect:
+            title = "Slip Away - Select Fog Token";
+            break;
+        case ScreenState::SlipAwayDestination:
+            title = "Slip Away - Select Empty Space";
+            break;
+        case ScreenState::RollingFogSelect:
+            title = "Rolling Fog - Select Fog Token";
+            break;
+        case ScreenState::RollingFogDestination:
+            title = "Rolling Fog - Select Destination";
             break;
         default:
             title = "Action Menu";
@@ -638,21 +654,21 @@ void TuiApp::handleEnter() {
             break;
 
         case ScreenState::LoadGame: {
-            if (selected_ < static_cast<int>(pendingSlots_.size())) {
-                int slot = pendingSlots_[selected_].first;
-                try {
-                    controller_.loadGame(slot);
-                    loadTuiState();
-                } catch (const std::exception& e) {
-                    showError(std::string("Failed to load: ") + e.what());
-                    state_ = ScreenState::MainMenu;
+                    if (selected_ < static_cast<int>(pendingSlots_.size())) {
+                        int slot = pendingSlots_[selected_].first;
+                        try {
+                            controller_.loadGame(slot);
+                            loadTuiState();
+                        } catch (const std::exception& e) {
+                            showError(std::string("Failed to load: ") + e.what());
+                            state_ = ScreenState::MainMenu;
+                        }
+                    } else {
+                        state_ = controller_.started() ? ScreenState::Game : ScreenState::MainMenu;
+                    }
+                    resetSelection();
+                    break;
                 }
-            } else {
-                state_ = ScreenState::MainMenu;
-            }
-            resetSelection();
-            break;
-        }
 
         case ScreenState::SetupAge: {
             if (ageInput_.empty()) {
@@ -677,6 +693,7 @@ void TuiApp::handleEnter() {
         }
 
         case ScreenState::FighterSelect:
+            remainingHeroes_.clear();
             if (selected_ == 0) {
                 selectedHero_ = std::make_unique<Dracula>();
                 remainingHeroes_.push_back(std::make_unique<Sherlock>());
@@ -767,6 +784,13 @@ void TuiApp::handleEnter() {
                 }
             } else {
                 controller_.resolveConfoundChoice(false);
+                pendingFogIndices_.clear();
+                const auto* invisible = dynamic_cast<const InvisibleMan*>(&controller_.currentPlayer().heroFighter());
+                if (invisible) {
+                    for (int i = 0; i < 3; ++i) {
+                        if (invisible->getFogTokens()[i] != -1) pendingFogIndices_.push_back(i);
+                    }
+                }
                 state_ = ScreenState::ConfoundFogSelect;
                 resetSelection();
             }
@@ -790,8 +814,6 @@ void TuiApp::handleEnter() {
             pendingSpaces_ = controller_.getValidConfoundDestinations(selectedFogIndex_);
             if (pendingSpaces_.empty()) {
                 showError("No valid destinations for this fog token.");
-                state_ = ScreenState::ConfoundFogSelect;
-                resetSelection();
                 return;
             }
             state_ = ScreenState::ConfoundDestinationSelect;
@@ -837,6 +859,46 @@ void TuiApp::handleEnter() {
             break;
         }
 
+        case ScreenState::SlipAwayFogSelect: {
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingFogIndices_.size())) {
+                showError("Invalid fog token selection.");
+                return;
+            }
+            controller_.resolveSlipAwayFogToken(pendingFogIndices_[selected_]);
+            openGameScreen();
+            break;
+        }
+
+        case ScreenState::SlipAwayDestination: {
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingSpaces_.size())) {
+                showError("Invalid destination.");
+                return;
+            }
+            controller_.resolveSlipAwayDestination(pendingSpaces_[selected_]);
+            openGameScreen();
+            break;
+        }
+
+        case ScreenState::RollingFogSelect: {
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingFogIndices_.size())) {
+                showError("Invalid fog token selection.");
+                return;
+            }
+            controller_.resolveRollingFogFogToken(pendingFogIndices_[selected_]);
+            openGameScreen();
+            break;
+        }
+
+        case ScreenState::RollingFogDestination: {
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingSpaces_.size())) {
+                showError("Invalid destination.");
+                return;
+            }
+            controller_.resolveRollingFogDestination(pendingSpaces_[selected_]);
+            openGameScreen();
+            break;
+        }
+
         case ScreenState::CodedNotesSelect: {
             const Player* player = nullptr;
             if (controller_.hasPendingCodedNotes()) {
@@ -845,55 +907,19 @@ void TuiApp::handleEnter() {
             } else {
                 player = &controller_.currentPlayer();
             }
-            if (!player) {
-                showError("Invalid player.");
-                return;
-            }
-            const auto& hand = player->hand();
-            size_t handSize = hand.size();
-            bool isFromScheme = (codedNotesCardIndex_ != -1);
-            size_t entriesSize = isFromScheme ? (handSize - 1) : handSize;
+            if (!player) return;
+            size_t handSize = player->hand().size();
 
-            if (selected_ == static_cast<int>(entriesSize)) {
+            if (selected_ == static_cast<int>(handSize)) {
                 if (selectedCodedNotesIndices_.size() != 2) {
                     showError("Please select exactly 2 cards.");
                     return;
                 }
-                std::vector<int> indices = selectedCodedNotesIndices_;
-                if (controller_.hasPendingCodedNotes()) {
-                    controller_.finishCodedNotes(indices);
-                } else {
-                    controller_.handleCodedNotes(codedNotesCardIndex_, indices);
-                }
+                controller_.finishCodedNotes(selectedCodedNotesIndices_);
                 selectedCodedNotesIndices_.clear();
-                codedNotesCardIndex_ = -1;
                 openGameScreen();
-            } else if (selected_ == static_cast<int>(entriesSize + 1)) {
-                if (controller_.hasPendingCodedNotes()) {
-                    controller_.cancelCodedNotes();
-                } else {
-                    Card played = controller_.currentPlayer().removeCardFromHand(codedNotesCardIndex_);
-                    controller_.currentPlayer().addToDiscard(std::move(played));
-                    controller_.decrementActions();
-                }
-                selectedCodedNotesIndices_.clear();
-                codedNotesCardIndex_ = -1;
-                openGameScreen();
-            } else {
-                int realIdx = -1;
-                int current = 0;
-                for (size_t i = 0; i < handSize; ++i) {
-                    if (isFromScheme && static_cast<int>(i) == codedNotesCardIndex_) continue;
-                    if (current == selected_) {
-                        realIdx = static_cast<int>(i);
-                        break;
-                    }
-                    ++current;
-                }
-                if (realIdx == -1) {
-                    showError("Invalid card selection.");
-                    return;
-                }
+            } else if (selected_ >= 0 && selected_ < static_cast<int>(handSize)) {
+                int realIdx = selected_;
                 auto it = std::find(selectedCodedNotesIndices_.begin(), selectedCodedNotesIndices_.end(), realIdx);
                 if (it != selectedCodedNotesIndices_.end()) {
                     selectedCodedNotesIndices_.erase(it);
@@ -910,11 +936,7 @@ void TuiApp::handleEnter() {
 
         case ScreenState::Game: {
             auto entries = currentMenuEntries();
-            if (entries.empty()) {
-                showError("No menu entries available.");
-                return;
-            }
-            if (selected_ < 0 || selected_ >= static_cast<int>(entries.size())) {
+            if (entries.empty() || selected_ < 0 || selected_ >= static_cast<int>(entries.size())) {
                 showError("Invalid selection.");
                 return;
             }
@@ -930,10 +952,6 @@ void TuiApp::handleEnter() {
                         }
                     }
                 }
-                if (pendingFighterIds_.empty()) {
-                    showError("No valid targets for Dracula ability.");
-                    return;
-                }
                 state_ = ScreenState::DraculaAbilityTarget;
                 resetSelection();
             } else if (choice == "Maneuver") {
@@ -947,16 +965,11 @@ void TuiApp::handleEnter() {
                 for (int i = 0; i < static_cast<int>(controller_.currentPlayer().hand().size()); ++i) {
                     pendingCardIndexes_.push_back(i);
                 }
-                if (pendingCardIndexes_.empty()) {
-                    showError("No cards to discard.");
-                    return;
-                }
                 state_ = ScreenState::DiscardCard;
                 resetSelection();
-            } else if (choice == "Drawing Card") {
-                showError("In legal play, drawing is performed through Maneuver or card effects.");
             } else if (choice == "Save Game") {
-                controller_.saveGame();
+                controller_.saveGame(1);
+                saveTuiState();
                 showError("Game saved successfully!");
                 openGameScreen();
             } else if (choice == "Help") {
@@ -975,17 +988,14 @@ void TuiApp::handleEnter() {
                         showError(std::string("Undo failed: ") + e.what());
                     }
                 } else {
-                    showError("Nothing to undo.");
+                    showError("Cannot undo: start of turn reached.");
                 }
             }
             break;
         }
 
         case ScreenState::ManeuverBoost: {
-            if (selected_ < 0 || selected_ >= static_cast<int>(pendingCardIndexes_.size()) + 1) {
-                showError("Invalid boost selection.");
-                return;
-            }
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingCardIndexes_.size()) + 1) return;
             std::optional<int> boostIndex;
             if (selected_ > 0) {
                 boostIndex = pendingCardIndexes_.at(static_cast<std::size_t>(selected_ - 1));
@@ -1013,10 +1023,7 @@ void TuiApp::handleEnter() {
                 break;
             }
             int index = selected_ - 1;
-            if (index < 0 || index >= static_cast<int>(pendingFighterIds_.size())) {
-                showError("Invalid fighter selection.");
-                return;
-            }
+            if (index < 0 || index >= static_cast<int>(pendingFighterIds_.size())) return;
             selectedAttackerId_ = pendingFighterIds_.at(static_cast<std::size_t>(index));
             pendingSpaces_ = controller_.reachableDestinationsFor(selectedAttackerId_);
             state_ = ScreenState::ManeuverDestination;
@@ -1038,10 +1045,7 @@ void TuiApp::handleEnter() {
                 break;
             }
             int index = selected_ - 1;
-            if (index < 0 || index >= static_cast<int>(pendingSpaces_.size())) {
-                showError("Invalid destination.");
-                return;
-            }
+            if (index < 0 || index >= static_cast<int>(pendingSpaces_.size())) return;
             int destination = pendingSpaces_.at(static_cast<std::size_t>(index));
             controller_.moveCurrentFighter(selectedAttackerId_, destination);
             if (controller_.remainingMovementForFighter(selectedAttackerId_) > 0) {
@@ -1072,10 +1076,7 @@ void TuiApp::handleEnter() {
         }
 
         case ScreenState::AttackAttacker: {
-            if (selected_ < 0 || selected_ >= static_cast<int>(pendingFighterIds_.size())) {
-                showError("Invalid attacker selection.");
-                return;
-            }
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingFighterIds_.size())) return;
             selectedAttackerId_ = pendingFighterIds_.at(static_cast<std::size_t>(selected_));
             pendingFighterIds_ = controller_.legalTargetsFor(selectedAttackerId_);
             if (pendingFighterIds_.empty()) {
@@ -1088,26 +1089,16 @@ void TuiApp::handleEnter() {
         }
 
         case ScreenState::AttackTarget: {
-            if (selected_ < 0 || selected_ >= static_cast<int>(pendingFighterIds_.size())) {
-                showError("Invalid target selection.");
-                return;
-            }
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingFighterIds_.size())) return;
             selectedTargetId_ = pendingFighterIds_.at(static_cast<std::size_t>(selected_));
             pendingCardIndexes_ = controller_.legalAttackCardsFor(selectedAttackerId_);
-            if (pendingCardIndexes_.empty()) {
-                showError("No legal attack cards.");
-                return;
-            }
             state_ = ScreenState::AttackCard;
             resetSelection();
             break;
         }
 
         case ScreenState::AttackCard: {
-            if (selected_ < 0 || selected_ >= static_cast<int>(pendingCardIndexes_.size())) {
-                showError("Invalid attack card selection.");
-                return;
-            }
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingCardIndexes_.size())) return;
             selectedAttackCardIndex_ = pendingCardIndexes_.at(static_cast<std::size_t>(selected_));
             selectedBeastFormBoostIndexes_.clear();
             if (controller_.currentPlayer().hand().at(static_cast<std::size_t>(selectedAttackCardIndex_)).getTitle() == "BEASTFORM") {
@@ -1126,10 +1117,6 @@ void TuiApp::handleEnter() {
         }
 
         case ScreenState::AttackBeastBoost: {
-            if (selected_ < 0 || selected_ >= static_cast<int>(pendingCardIndexes_.size()) + 1) {
-                showError("Invalid Beast Form selection.");
-                return;
-            }
             if (selected_ == 0) {
                 pendingCardIndexes_ = controller_.legalDefenseCardsFor(selectedTargetId_);
                 state_ = ScreenState::DefenseCard;
@@ -1145,10 +1132,7 @@ void TuiApp::handleEnter() {
         }
 
         case ScreenState::DefenseElementaryPrediction: {
-            if (selected_ < 0 || selected_ >= static_cast<int>(pendingValues_.size())) {
-                showError("Invalid prediction value.");
-                return;
-            }
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingValues_.size())) return;
             int predicted = pendingValues_.at(static_cast<std::size_t>(selected_));
             controller_.resolveAttack(selectedAttackerId_, selectedTargetId_, selectedAttackCardIndex_,
                                       selectedDefenseCardIndex_, selectedBeastFormBoostIndexes_, predicted);
@@ -1166,10 +1150,7 @@ void TuiApp::handleEnter() {
                 break;
             }
             int index = selected_ - 1;
-            if (index < 0 || index >= static_cast<int>(pendingCardIndexes_.size())) {
-                showError("Invalid defense card selection.");
-                return;
-            }
+            if (index < 0 || index >= static_cast<int>(pendingCardIndexes_.size())) return;
             int defenseIndex = pendingCardIndexes_.at(static_cast<std::size_t>(index));
             const Card& defenseCard = controller_.opponentPlayer().hand().at(defenseIndex);
             if (defenseCard.getTitle() == "ELEMENTARY") {
@@ -1196,28 +1177,14 @@ void TuiApp::handleEnter() {
             break;
 
         case ScreenState::DiscardCard: {
-            if (pendingCardIndexes_.empty()) {
-                state_ = ScreenState::Game;
-                resetSelection();
-                break;
-            }
-            if (selected_ < 0 || selected_ >= static_cast<int>(pendingCardIndexes_.size())) {
-                showError("Invalid card selection.");
-                return;
-            }
-            int cardIndex = controller_.getConfoundSchemeCardIndex();
-            int opponentCardIndex = pendingCardIndexes_.at(selected_);
-            controller_.handleConfoundDiscard(cardIndex, opponentCardIndex);
-            controller_.setConfoundSchemeCardIndex(-1);
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingCardIndexes_.size())) return;
+            controller_.discardCurrentPlayerCard(pendingCardIndexes_.at(selected_));
             openGameScreen();
             break;
         }
 
         case ScreenState::DiscardToLimit: {
-            if (selected_ < 0 || selected_ >= static_cast<int>(pendingCardIndexes_.size())) {
-                showError("Invalid card selection.");
-                return;
-            }
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingCardIndexes_.size())) return;
             controller_.discardCurrentPlayerCard(pendingCardIndexes_.at(static_cast<std::size_t>(selected_)));
             if (controller_.currentPlayerMustDiscardToLimit()) {
                 pendingCardIndexes_.clear();
@@ -1232,10 +1199,7 @@ void TuiApp::handleEnter() {
         }
 
         case ScreenState::DraculaAbilityTarget: {
-            if (selected_ < 0 || selected_ >= static_cast<int>(pendingFighterIds_.size())) {
-                showError("Invalid target selection.");
-                return;
-            }
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingFighterIds_.size())) return;
             controller_.useDraculaStartAbility(pendingFighterIds_.at(static_cast<std::size_t>(selected_)));
             openGameScreen();
             break;
@@ -1248,20 +1212,14 @@ void TuiApp::handleEnter() {
                 break;
             }
             int index = selected_ - 1;
-            if (index < 0 || index >= static_cast<int>(pendingSpaces_.size())) {
-                showError("Invalid destination.");
-                return;
-            }
+            if (index < 0 || index >= static_cast<int>(pendingSpaces_.size())) return;
             controller_.resolvePendingOptionalMovement(pendingSpaces_.at(static_cast<std::size_t>(index)));
             openGameScreen();
             break;
         }
 
         case ScreenState::ConfirmSuspicionChoice: {
-            if (selected_ < 0 || selected_ >= static_cast<int>(pendingCardIndexes_.size())) {
-                showError("Invalid card choice.");
-                return;
-            }
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingCardIndexes_.size())) return;
             int chosenIndex = pendingCardIndexes_.at(static_cast<std::size_t>(selected_));
             controller_.applyConfirmSuspicion(chosenIndex);
             Card played = controller_.currentPlayer().removeCardFromHand(selectedSchemeCardIndex_);
@@ -1278,10 +1236,7 @@ void TuiApp::handleEnter() {
             break;
 
         case ScreenState::PlaceVanishedInvisibleMan: {
-            if (selected_ < 0 || selected_ >= static_cast<int>(pendingSpaces_.size())) {
-                showError("Invalid space selection.");
-                return;
-            }
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingSpaces_.size())) return;
             int chosenSpace = pendingSpaces_.at(static_cast<std::size_t>(selected_));
             controller_.placeVanishedInvisibleMan(chosenSpace);
             openGameScreen();
@@ -1347,7 +1302,6 @@ std::vector<std::string> TuiApp::currentMenuEntries() const {
             entries.push_back("Attack");
             entries.push_back("Scheme");
             entries.push_back("Discarding Cards");
-            entries.push_back("Drawing Card");
             entries.push_back("Save Game");
             entries.push_back("Help");
             entries.push_back("Back to main menu");
@@ -1540,9 +1494,39 @@ std::vector<std::string> TuiApp::currentMenuEntries() const {
         }
         case ScreenState::LurkingDestination: {
             std::vector<std::string> entries;
-            for (int space : pendingSpaces_) {
-                entries.push_back(spaceMenuLabel(space));
+            for (int space : pendingSpaces_) entries.push_back(spaceMenuLabel(space));
+            return entries;
+        }
+        case ScreenState::SlipAwayFogSelect: {
+            std::vector<std::string> entries;
+            const auto* invisible = dynamic_cast<const InvisibleMan*>(&controller_.currentPlayer().heroFighter());
+            if (invisible) {
+                const auto& tokens = invisible->getFogTokens();
+                for (int idx : pendingFogIndices_) {
+                    entries.push_back("Fog Token " + std::to_string(idx + 1) + " (space " + std::to_string(tokens[idx]) + ")");
+                }
             }
+            return entries;
+        }
+        case ScreenState::SlipAwayDestination: {
+            std::vector<std::string> entries;
+            for (int space : pendingSpaces_) entries.push_back(spaceMenuLabel(space));
+            return entries;
+        }
+        case ScreenState::RollingFogSelect: {
+            std::vector<std::string> entries;
+            const auto* invisible = dynamic_cast<const InvisibleMan*>(&controller_.currentPlayer().heroFighter());
+            if (invisible) {
+                const auto& tokens = invisible->getFogTokens();
+                for (int idx : pendingFogIndices_) {
+                    entries.push_back("Fog Token " + std::to_string(idx + 1) + " (space " + std::to_string(tokens[idx]) + ")");
+                }
+            }
+            return entries;
+        }
+        case ScreenState::RollingFogDestination: {
+            std::vector<std::string> entries;
+            for (int space : pendingSpaces_) entries.push_back(spaceMenuLabel(space));
             return entries;
         }
         case ScreenState::CodedNotesSelect: {
@@ -1556,14 +1540,12 @@ std::vector<std::string> TuiApp::currentMenuEntries() const {
             }
             if (player) {
                 for (size_t i = 0; i < player->hand().size(); ++i) {
-                    if (codedNotesCardIndex_ != -1 && static_cast<int>(i) == codedNotesCardIndex_) continue;
                     bool isSelected = (std::find(selectedCodedNotesIndices_.begin(), selectedCodedNotesIndices_.end(), static_cast<int>(i)) != selectedCodedNotesIndices_.end());
                     std::string prefix = isSelected ? "[X] " : "[ ] ";
                     entries.push_back(prefix + player->hand()[i].getTitle());
                 }
             }
             entries.push_back("Confirm selection (" + std::to_string(selectedCodedNotesIndices_.size()) + "/2 selected)");
-            entries.push_back("Cancel");
             return entries;
         }
         case ScreenState::PlaceVanishedInvisibleMan: {
@@ -1589,23 +1571,34 @@ void TuiApp::showError(const std::string& message) {
 void TuiApp::openGameScreen() {
     if (controller_.gameOver()) {
         state_ = ScreenState::GameOver;
+    } else if (controller_.hasPendingVanishedPlacement() && dynamic_cast<InvisibleMan*>(&controller_.currentPlayer().heroFighter())) {
+        pendingSpaces_ = controller_.getValidPlacementSpacesForVanished();
+        state_ = ScreenState::PlaceVanishedInvisibleMan;
     } else if (!controller_.getStudyMethodsHandInfo().empty()) {
         state_ = ScreenState::StudyMethodsView;
     } else if (!controller_.getConfirmSuspicionHandInfo().empty()) {
         state_ = ScreenState::ConfirmSuspicionNoMatchView;
-   } else if (controller_.hasPendingCodedNotes()) {
-        const auto& pending = controller_.pendingCodedNotes();
-        const Player& player = controller_.players()[pending.playerIndex];
-        pendingCardIndexes_.clear();
-        for (int i = 0; i < static_cast<int>(player.hand().size()); ++i) {
-            pendingCardIndexes_.push_back(i);
-        }
+    } else if (controller_.hasPendingCodedNotes()) {
         selectedCodedNotesIndices_.clear();
-        codedNotesCardIndex_ = -1;
         state_ = ScreenState::CodedNotesSelect;
-        resetSelection();
-    } else if (controller_.getConfoundSchemeCardIndex() != -1) {
-        state_ = ScreenState::ConfoundChoice;
+    } else if (controller_.hasPendingSlipAway()) {
+        const auto& pending = controller_.pendingSlipAway();
+        if (pending.step == 0) {
+            pendingFogIndices_ = controller_.getSlipAwayFogTokens();
+            state_ = ScreenState::SlipAwayFogSelect;
+        } else {
+            pendingSpaces_ = controller_.getSlipAwayDestinations();
+            state_ = ScreenState::SlipAwayDestination;
+        }
+    } else if (controller_.hasPendingRollingFog()) {
+        const auto& pending = controller_.pendingRollingFog();
+        if (pending.step == 0) {
+            pendingFogIndices_ = controller_.getRollingFogTokens();
+            state_ = ScreenState::RollingFogSelect;
+        } else {
+            pendingSpaces_ = controller_.getRollingFogDestinations(pending.selectedFogIndex);
+            state_ = ScreenState::RollingFogDestination;
+        }
     } else if (controller_.hasPendingFogChoice()) {
         if (selectedFogIndex_ == -1) {
             pendingFogIndices_ = controller_.pendingFogChoices();
@@ -1614,18 +1607,19 @@ void TuiApp::openGameScreen() {
             pendingFogDestinations_ = controller_.getReachableFogDestinations(selectedFogIndex_);
             state_ = ScreenState::FogDestination;
         }
-        resetSelection();
     } else if (controller_.hasPendingConfoundChoice()) {
-        auto* invisible = dynamic_cast<InvisibleMan*>(&controller_.currentPlayer().heroFighter());
-        if (invisible) {
-            pendingFogIndices_.clear();
-            const auto& tokens = invisible->getFogTokens();
-            for (int i = 0; i < static_cast<int>(tokens.size()); ++i) {
-                if (tokens[i] != -1) pendingFogIndices_.push_back(i);
+        const auto& pending = controller_.pendingConfoundChoice();
+        if (!pending.opponentDecided) {
+            state_ = ScreenState::ConfoundChoice;
+        } else if (pending.opponentWantsToDiscard) {
+            state_ = ScreenState::ConfoundDiscardSelect;
+        } else {
+            if (selectedFogIndex_ == -1) {
+                state_ = ScreenState::ConfoundFogSelect;
+            } else {
+                state_ = ScreenState::ConfoundDestinationSelect;
             }
         }
-        state_ = ScreenState::ConfoundChoice;
-        resetSelection();
     } else if (controller_.hasPendingOptionalMovement()) {
         pendingSpaces_ = controller_.pendingOptionalMovementDestinations();
         state_ = ScreenState::OptionalMovementDestination;
@@ -1634,7 +1628,7 @@ void TuiApp::openGameScreen() {
         if (pending.step == 0) {
             state_ = ScreenState::LurkingChoice;
         } else if (pending.step == 1 && pending.choice == 0) {
-            pendingSpaces_ = controller_.getLurkingOptions();
+            pendingSpaces_ = controller_.getLurkingFogPositions();
             state_ = ScreenState::LurkingDestination;
         } else if (pending.step == 1 && pending.choice == 1) {
             pendingFogIndices_ = controller_.getLurkingFogTokens();
@@ -1643,16 +1637,12 @@ void TuiApp::openGameScreen() {
             pendingSpaces_ = controller_.getLurkingDestinations(pending.selectedFogIndex);
             state_ = ScreenState::LurkingDestination;
         }
-        resetSelection();
     } else if (controller_.currentPlayerMustDiscardToLimit()) {
         pendingCardIndexes_.clear();
         for (int i = 0; i < static_cast<int>(controller_.currentPlayer().hand().size()); ++i) {
             pendingCardIndexes_.push_back(i);
         }
         state_ = ScreenState::DiscardToLimit;
-    } else if (controller_.hasPendingVanishedPlacement()) {
-        pendingSpaces_ = controller_.getValidPlacementSpacesForVanished();
-        state_ = ScreenState::PlaceVanishedInvisibleMan;
     } else {
         state_ = ScreenState::Game;
     }
@@ -1687,7 +1677,6 @@ void TuiApp::startGameFromSetup() {
     selectedBeastFormBoostIndexes_.clear();
     waitingForDestination_ = false;
     codedNotesCardIndex_ = -1;
-    lurkingCardIndex_ = -1;
     stepLightlyCardIndex_ = -1;
     selectedCodedNotesIndices_.clear();
     schemeChoice_ = SchemeChoice{};
@@ -1740,9 +1729,24 @@ void TuiApp::chooseSchemeCard(int selectedMenuIndex) {
 
     const Card& card = controller_.currentPlayer().hand().at(selectedSchemeCardIndex_);
 
-    if (card.getTitle() == "LURKING") {
-        lurkingCardIndex_ = selectedSchemeCardIndex_;
-        state_ = ScreenState::LurkingChoice;
+    if (card.getTitle() == "VANISH") {
+        controller_.handleVanish(selectedSchemeCardIndex_);
+        openGameScreen();
+        return;
+    }
+
+    if (card.getTitle() == "ROLLING FOG") {
+        pendingFogIndices_.clear();
+        const auto* invisible = dynamic_cast<const InvisibleMan*>(&controller_.currentPlayer().heroFighter());
+        if (invisible) {
+            for (int i = 0; i < 3; ++i) {
+                if (invisible->getFogTokens()[i] != -1) pendingFogIndices_.push_back(i);
+            }
+        }
+        Card played = controller_.currentPlayer().removeCardFromHand(selectedSchemeCardIndex_);
+        controller_.currentPlayer().addToDiscard(std::move(played));
+        controller_.decrementActions();
+        state_ = ScreenState::RollingFogSelect;
         resetSelection();
         return;
     }
@@ -1765,14 +1769,6 @@ void TuiApp::chooseSchemeCard(int selectedMenuIndex) {
         }
         stepLightlyCardIndex_ = selectedSchemeCardIndex_;
         state_ = ScreenState::StepLightlyTarget;
-        resetSelection();
-        return;
-    }
-
-    if (card.getTitle() == "CODED NOTES") {
-        codedNotesCardIndex_ = selectedSchemeCardIndex_;
-        selectedCodedNotesIndices_.clear();
-        state_ = ScreenState::CodedNotesSelect;
         resetSelection();
         return;
     }
@@ -1802,19 +1798,6 @@ void TuiApp::chooseSchemeCard(int selectedMenuIndex) {
         pendingFighterIds_ = controller_.targetChoicesForScheme(selectedSchemeCardIndex_);
     }
 
-    bool hasChoices = !pendingSpaces_.empty() || !pendingFighterIds_.empty() ||
-                      !pendingValues_.empty() || !pendingCardIndexes_.empty();
-
-    if (!hasChoices) {
-        showError("This scheme has no legal choice right now.");
-        Card played = controller_.currentPlayer().removeCardFromHand(selectedSchemeCardIndex_);
-        controller_.currentPlayer().addToDiscard(std::move(played));
-        controller_.decrementActions();
-        controller_.endTurnIfNeeded();
-        openGameScreen();
-        return;
-    }
-
     state_ = ScreenState::SchemeChoice;
     resetSelection();
 }
@@ -1824,7 +1807,7 @@ std::string TuiApp::fighterMenuLabel(const std::string& fighterId) const {
     if (!fighter) return fighterId;
     std::ostringstream label;
     label << fighter->displayName() << " | HP " << fighter->health() << "/" << fighter->maxHealth();
-    if (!fighter->defeated()) {
+    if (!fighter->defeated() && fighter->spaceId() != -1) {
         label << " | Space " << fighter->spaceId();
         int rem = controller_.remainingMovementForFighter(fighterId);
         if (rem >= 0) label << " | Moves: " << rem;
@@ -1866,11 +1849,6 @@ void TuiApp::completeSchemeChoice() {
                 resetSelection();
                 return;
             }
-        } else {
-            schemeChoice_.namedValue = namedValue;
-            controller_.playScheme(selectedSchemeCardIndex_, schemeChoice_);
-            openGameScreen();
-            return;
         }
     }
 
@@ -1917,6 +1895,7 @@ void TuiApp::completeSchemeChoice() {
         controller_.playScheme(selectedSchemeCardIndex_, schemeChoice_);
         waitingForDestination_ = false;
         openGameScreen();
+        return;
     }
 
     showError("Invalid scheme choice.");
@@ -1974,6 +1953,7 @@ Element TuiApp::fighterLine(const Fighter& fighter) const {
          << " HP " << std::setw(2) << fighter.health() << "/" << std::setw(2) << fighter.maxHealth()
          << " " << hpBar(fighter.health(), fighter.maxHealth());
     if (fighter.defeated()) line << " defeated";
+    else if (fighter.spaceId() == -1) line << " vanished";
     else line << " space " << fighter.spaceId();
     return text(line.str());
 }
@@ -1995,7 +1975,6 @@ json TuiApp::serializeState() const {
     j["selectedBeastFormBoostIndexes"] = selectedBeastFormBoostIndexes_;
     j["waitingForDestination"] = waitingForDestination_;
     j["codedNotesCardIndex"] = codedNotesCardIndex_;
-    j["lurkingCardIndex"] = lurkingCardIndex_;
     j["stepLightlyCardIndex"] = stepLightlyCardIndex_;
     j["selectedCodedNotesIndices"] = selectedCodedNotesIndices_;
     json sc;
@@ -2023,7 +2002,6 @@ void TuiApp::deserializeState(const json& j) {
     selectedBeastFormBoostIndexes_ = j.value("selectedBeastFormBoostIndexes", std::vector<int>{});
     waitingForDestination_ = j.value("waitingForDestination", false);
     codedNotesCardIndex_ = j.value("codedNotesCardIndex", -1);
-    lurkingCardIndex_ = j.value("lurkingCardIndex", -1);
     stepLightlyCardIndex_ = j.value("stepLightlyCardIndex", -1);
     if (j.contains("selectedCodedNotesIndices")) {
         selectedCodedNotesIndices_ = j["selectedCodedNotesIndices"].get<std::vector<int>>();
@@ -2054,4 +2032,4 @@ void TuiApp::loadTuiState() {
     else resetSelection();
 }
 
-}  // namespace unmatched
+} // namespace unmatched

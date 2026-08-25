@@ -11,7 +11,6 @@
 #include <string>
 #include <vector>
 #include <map>
-#include <random>
 
 namespace unmatched {
 
@@ -72,14 +71,27 @@ struct PendingCodedNotesChoice {
     int playerIndex = -1;
 };
 
+struct PendingSlipAwayChoice {
+    int playerIndex = -1;
+    int selectedFogIndex = -1;
+    int step = 0;
+};
+
+struct PendingRollingFogChoice {
+    int playerIndex = -1;
+    int selectedFogIndex = -1;
+    int step = 0;
+};
+
 class GameController {
 public:
     GameController();
 
     void startNewGame(int playerOneAge, int playerTwoAge,
-                  std::unique_ptr<Fighter> hero1,
-                  std::unique_ptr<Fighter> hero2,
-                  int youngerStartSlot);
+                      std::unique_ptr<Fighter> hero1,
+                      std::unique_ptr<Fighter> hero2,
+                      int youngerStartSlot);
+    void resetState();
     bool started() const;
     bool gameOver() const;
     const std::string& winnerName() const;
@@ -176,24 +188,20 @@ public:
     void setConfirmSuspicionHandInfo(const std::string& info);
     const std::string& getConfirmSuspicionHandInfo() const { return confirmSuspicionHandInfo_; }
     void clearConfirmSuspicionHandInfo() { confirmSuspicionHandInfo_.clear(); }
-    void handleConfoundDiscard(int handIndex, int opponentCardIndex);
-    void handleConfoundFogMove(int handIndex);
-    void saveGame();
+    void saveGame(int slot = 1);
     void loadGame(int slot);
     std::vector<std::pair<int, std::string>> getSaveSlots() const;
     std::vector<int> freeSpacesSharingHeroZone(const Player& player) const;
-    void handleConfound(int handIndex, bool opponentDiscards);
-    void handleVanish(int handIndex, int destinationSpace);
     void handleStepLightly(int handIndex, const std::string& targetFighterId);
-    void handleLurking(int handIndex, int choice);
+    void handleVanish(int handIndex);
     void playConfirmSuspicion(int handIndex, int namedValue);
     void handleStudyMethods(int cardIndex, bool won);
     bool hasPendingConfoundChoice() const;
+    const PendingConfoundChoice& pendingConfoundChoice() const;
     void resolveConfoundChoice(bool opponentWantsToDiscard);
     void resolveConfoundDiscard(int cardIndex);
     void resolveConfoundFogMove(int fogIndex, int destinationSpace);
     void setStudyMethodsHandInfo(const std::string& info) { studyMethodsHandInfo_ = info; }
-    void handleCodedNotes(int handIndex, const std::vector<int>& selectedIndices);
 
     void pushUndoState();
     bool canUndo() const;
@@ -206,16 +214,16 @@ public:
     std::vector<int> getReachableFogDestinations(int fogIndex) const;
     void moveFogToken(int fogIndex, int destinationSpace);
     void queueFogChoice(int chooserPlayerIndex, const std::string& fighterId, int maxSteps,
-                        int excludedIndex = -1, const std::string& source = "");
-    void resolvePendingFogChoice(int fogIndex);
+                          int excludedIndex = -1, const std::string& source = "");
 
     bool hasPendingCodedNotes() const;
     const PendingCodedNotesChoice& pendingCodedNotes() const;
     void finishCodedNotes(const std::vector<int>& selectedIndices);
     void cancelCodedNotes();
+
     bool hasPendingLurking() const;
     const PendingLurkingChoice& pendingLurking() const;
-    std::vector<std::string> getLurkingOptions() const;
+    std::vector<int> getLurkingFogPositions() const;
     std::vector<int> getLurkingFogTokens() const;
     std::vector<int> getLurkingDestinations(int fogIndex) const;
     void resolveLurkingChoice(int choice);
@@ -223,8 +231,27 @@ public:
     void resolveLurkingDestination(int destinationSpace);
     void cancelLurking();
 
+    bool hasPendingSlipAway() const;
+    const PendingSlipAwayChoice& pendingSlipAway() const;
+    std::vector<int> getSlipAwayFogTokens() const;
+    std::vector<int> getSlipAwayDestinations() const;
+    void resolveSlipAwayFogToken(int fogIndex);
+    void resolveSlipAwayDestination(int destinationSpace);
+    void cancelSlipAway();
+
+    bool hasPendingRollingFog() const;
+    const PendingRollingFogChoice& pendingRollingFog() const;
+    std::vector<int> getRollingFogTokens() const;
+    std::vector<int> getRollingFogDestinations(int fogIndex) const;
+    void resolveRollingFogFogToken(int fogIndex);
+    void resolveRollingFogDestination(int destinationSpace);
+    void cancelRollingFog();
+
     std::vector<int> getValidConfoundDestinations(int fogIndex) const;
     std::vector<int> getThirstDestinations(const std::string& defenderId) const;
+
+    json createFullSnapshot() const;
+    void restoreFullSnapshot(const json& snapshot);
 
 private:
     std::map<std::string, int> remainingMovementPoints_;
@@ -286,13 +313,13 @@ private:
     std::optional<PendingRaveningChoice> pendingRaveningChoice_;
     std::optional<PendingCodedNotesChoice> pendingCodedNotesChoice_;
     std::optional<PendingLurkingChoice> pendingLurkingChoice_;
+    std::optional<PendingSlipAwayChoice> pendingSlipAwayChoice_;
+    std::optional<PendingRollingFogChoice> pendingRollingFogChoice_;
 
     std::vector<json> undoStack_;
     static constexpr size_t MAX_UNDO_STATES = 30;
 
     std::map<int, int> computeReachableWithCost(int start, int maxSteps, const std::string& fighterId) const;
-    json createFullSnapshot() const;
-    void restoreFullSnapshot(const json& snapshot);
 };
 
 } // namespace unmatched
