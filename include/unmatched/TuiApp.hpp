@@ -154,8 +154,8 @@ private:
     std::vector<std::pair<int, std::string>> pendingSlots_;
     json serializeState() const;
     void deserializeState(const json& j);
-    void saveTuiState() const;
-    void loadTuiState();
+    void saveTuiState(int slot = 1) const;
+    void loadTuiState(int slot = 1);
     int selectedFogIndex_ = -1;
     std::vector<int> pendingFogDestinations_;
 };

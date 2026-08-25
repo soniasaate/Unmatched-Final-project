@@ -19,6 +19,7 @@ std::vector<Card> jsonToCards(const json& j);
 json fighterToJson(const Fighter& fighter);
 std::unique_ptr<Fighter> jsonToFighter(const json& j);
 
+void rotateSaveFiles();
 int findEmptySlot();
 
 } // namespace unmatched

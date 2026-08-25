@@ -55,8 +55,12 @@ std::vector<Card> jsonToCards(const json& j) {
 json fighterToJson(const Fighter& fighter) {
     json j;
     j["id"] = fighter.id();
+    j["displayName"] = fighter.displayName();
+    j["cardOwner"] = static_cast<int>(fighter.cardOwner());
+    j["range"] = static_cast<int>(fighter.range());
     j["health"] = fighter.health();
     j["maxHealth"] = fighter.maxHealth();
+    j["move"] = fighter.move();
     j["spaceId"] = fighter.spaceId();
     j["defeated"] = fighter.defeated();
     j["isHero"] = fighter.isHero();
@@ -73,6 +77,7 @@ json fighterToJson(const Fighter& fighter) {
             fogTokens.push_back(t);
         }
         j["fogTokens"] = fogTokens;
+        j["startTurnSpace"] = inv->getStartTurnSpace();
     } else {
         j["heroType"] = "Sidekick";
     }
@@ -98,15 +103,22 @@ std::unique_ptr<Fighter> jsonToFighter(const json& j) {
             inv->placeFogTokens(tokens);
         }
     } else {
+        std::string id = j["id"].get<std::string>();
+        std::string displayName = j.value("displayName", id);
+        Character cardOwner = static_cast<Character>(j.value("cardOwner", static_cast<int>(Character::Any)));
+        AttackRange range = static_cast<AttackRange>(j.value("range", static_cast<int>(AttackRange::Melee)));
+        int maxHealth = j["maxHealth"].get<int>();
+        int move = j.value("move", 2);
+
         fighter = std::make_unique<Fighter>(
             FighterDefinition(
-                j["id"].get<std::string>(),
-                j["id"].get<std::string>(),
-                Character::Any,
+                id,
+                displayName,
+                cardOwner,
                 false,
-                j["maxHealth"].get<int>(),
-                2,
-                AttackRange::Melee,
+                maxHealth,
+                move,
+                range,
                 "Sidekick"
             )
         );
@@ -118,15 +130,39 @@ std::unique_ptr<Fighter> jsonToFighter(const json& j) {
     return fighter;
 }
 
-int findEmptySlot() {
-    if (fs::exists("save2.json")) {
-        std::error_code ec;
+void rotateSaveFiles() {
+    std::error_code ec;
+
+    // شیفت اسلات ۲ به اسلات ۳
+    if (fs::exists("save2.json", ec)) {
+        if (fs::exists("save3.json", ec)) {
+            fs::remove("save3.json", ec);
+        }
         fs::rename("save2.json", "save3.json", ec);
     }
-    if (fs::exists("save1.json")) {
-        std::error_code ec;
+    if (fs::exists("tui_state2.json", ec)) {
+        if (fs::exists("tui_state3.json", ec)) {
+            fs::remove("tui_state3.json", ec);
+        }
+        fs::rename("tui_state2.json", "tui_state3.json", ec);
+    }
+
+    // شیفت اسلات ۱ به اسلات ۲
+    if (fs::exists("save1.json", ec)) {
+        if (fs::exists("save2.json", ec)) {
+            fs::remove("save2.json", ec);
+        }
         fs::rename("save1.json", "save2.json", ec);
     }
+    if (fs::exists("tui_state1.json", ec)) {
+        if (fs::exists("tui_state2.json", ec)) {
+            fs::remove("tui_state2.json", ec);
+        }
+        fs::rename("tui_state1.json", "tui_state2.json", ec);
+    }
+}
+
+int findEmptySlot() {
     return 1;
 }
 

@@ -194,6 +194,7 @@ public:
     std::vector<int> freeSpacesSharingHeroZone(const Player& player) const;
     void handleStepLightly(int handIndex, const std::string& targetFighterId);
     void handleVanish(int handIndex);
+    void beginRollingFog(int handIndex);
     void playConfirmSuspicion(int handIndex, int namedValue);
     void handleStudyMethods(int cardIndex, bool won);
     bool hasPendingConfoundChoice() const;

@@ -160,10 +160,11 @@ Element TuiApp::renderConfoundChoiceView() const {
     Elements body;
     body.push_back(text("CONFOUND") | bold | color(Color::Yellow) | center);
     body.push_back(separator());
+    body.push_back(text("[Opponent Action]") | bold | color(Color::Magenta) | center);
     body.push_back(text("Opponent may discard 1 card from hand. Do you want to discard a card?") | center);
     body.push_back(separator());
     body.push_back(menuLine("[1] Yes, discard a card", selected_ == 0));
-    body.push_back(menuLine("[2] No, skip discarding", selected_ == 1));
+    body.push_back(menuLine("[2] No, skip discarding (Invisible Man moves a fog token)", selected_ == 1));
     body.push_back(separator());
     body.push_back(text("Use Arrow keys and Enter to choose.") | dim | center);
     if (!errorMessage_.empty()) {
@@ -245,19 +246,17 @@ bool TuiApp::OnEvent(Event event) {
     try {
         if (event == Event::Character("s") || event == Event::Character("S")) {
             if (controller_.started() && !controller_.gameOver()) {
-                int slot = controller_.getSaveSlots().empty() ? 1 : findEmptySlot();
-                controller_.saveGame(slot);
-                saveTuiState();
-                showError("Game saved successfully in slot " + std::to_string(slot) + "!");
+                controller_.saveGame(1);
+                saveTuiState(1);
+                showError("Game saved successfully to Slot 1!");
                 return true;
             }
             return true;
         }
         if (event == Event::Character("e") || event == Event::Character("E")) {
             if (controller_.started() && !controller_.gameOver()) {
-                int slot = controller_.getSaveSlots().empty() ? 1 : findEmptySlot();
-                controller_.saveGame(slot);
-                saveTuiState();
+                controller_.saveGame(1);
+                saveTuiState(1);
                 state_ = ScreenState::MainMenu;
                 resetSelection();
                 showError("Game saved and exited to main menu.");
@@ -533,6 +532,15 @@ Element TuiApp::renderActionPanel() const {
         case ScreenState::RollingFogDestination:
             title = "Rolling Fog - Select Destination";
             break;
+        case ScreenState::RaveningTarget:
+            title = "Ravening Seduction - Select Fighter";
+            break;
+        case ScreenState::RaveningDestination:
+            title = "Ravening Seduction - Select Destination";
+            break;
+        case ScreenState::RaveningContinue:
+            title = "Ravening Seduction - Move More Fighters?";
+            break;
         default:
             title = "Action Menu";
             break;
@@ -654,21 +662,21 @@ void TuiApp::handleEnter() {
             break;
 
         case ScreenState::LoadGame: {
-                    if (selected_ < static_cast<int>(pendingSlots_.size())) {
-                        int slot = pendingSlots_[selected_].first;
-                        try {
-                            controller_.loadGame(slot);
-                            loadTuiState();
-                        } catch (const std::exception& e) {
-                            showError(std::string("Failed to load: ") + e.what());
-                            state_ = ScreenState::MainMenu;
-                        }
-                    } else {
-                        state_ = controller_.started() ? ScreenState::Game : ScreenState::MainMenu;
-                    }
-                    resetSelection();
-                    break;
+            if (selected_ < static_cast<int>(pendingSlots_.size())) {
+                int slot = pendingSlots_[selected_].first;
+                try {
+                    controller_.loadGame(slot);
+                    loadTuiState();
+                } catch (const std::exception& e) {
+                    showError(std::string("Failed to load: ") + e.what());
+                    state_ = ScreenState::MainMenu;
                 }
+            } else {
+                state_ = controller_.started() ? ScreenState::Game : ScreenState::MainMenu;
+            }
+            resetSelection();
+            break;
+        }
 
         case ScreenState::SetupAge: {
             if (ageInput_.empty()) {
@@ -896,6 +904,47 @@ void TuiApp::handleEnter() {
             }
             controller_.resolveRollingFogDestination(pendingSpaces_[selected_]);
             openGameScreen();
+            break;
+        }
+
+        case ScreenState::RaveningTarget: {
+            if (selected_ == 0) {
+                controller_.finishRaveningScheme();
+                openGameScreen();
+                break;
+            }
+            int idx = selected_ - 1;
+            if (idx < 0 || idx >= static_cast<int>(pendingFighterIds_.size())) return;
+            selectedRaveningFighterId_ = pendingFighterIds_[idx];
+            pendingSpaces_ = controller_.getRaveningDestinations(selectedRaveningFighterId_);
+            state_ = ScreenState::RaveningDestination;
+            resetSelection();
+            break;
+        }
+
+        case ScreenState::RaveningDestination: {
+            if (selected_ < 0 || selected_ >= static_cast<int>(pendingSpaces_.size())) return;
+            int destination = pendingSpaces_[selected_];
+            controller_.applyRaveningMove(selectedRaveningFighterId_, destination);
+            state_ = ScreenState::RaveningContinue;
+            resetSelection();
+            break;
+        }
+
+        case ScreenState::RaveningContinue: {
+            if (selected_ == 0) {
+                pendingFighterIds_ = controller_.getRaveningTargets();
+                if (pendingFighterIds_.empty()) {
+                    controller_.finishRaveningScheme();
+                    openGameScreen();
+                } else {
+                    state_ = ScreenState::RaveningTarget;
+                    resetSelection();
+                }
+            } else {
+                controller_.finishRaveningScheme();
+                openGameScreen();
+            }
             break;
         }
 
@@ -1428,7 +1477,7 @@ std::vector<std::string> TuiApp::currentMenuEntries() const {
             return entries;
         }
         case ScreenState::ConfoundChoice:
-            return {"Yes, discard a card", "No, move a fog token"};
+            return {"Yes, discard a card", "No, skip discarding (Invisible Man moves a fog token)"};
         case ScreenState::ConfoundDiscardSelect: {
             std::vector<std::string> entries;
             for (int idx : pendingCardIndexes_) entries.push_back(cardMenuLabel(controller_.opponentPlayer(), idx));
@@ -1528,6 +1577,24 @@ std::vector<std::string> TuiApp::currentMenuEntries() const {
             std::vector<std::string> entries;
             for (int space : pendingSpaces_) entries.push_back(spaceMenuLabel(space));
             return entries;
+        }
+        case ScreenState::RaveningTarget: {
+            std::vector<std::string> entries;
+            entries.push_back("Done moving fighters");
+            for (const auto& id : pendingFighterIds_) {
+                entries.push_back(fighterMenuLabel(id));
+            }
+            return entries;
+        }
+        case ScreenState::RaveningDestination: {
+            std::vector<std::string> entries;
+            for (int space : pendingSpaces_) {
+                entries.push_back(spaceMenuLabel(space));
+            }
+            return entries;
+        }
+        case ScreenState::RaveningContinue: {
+            return {"Move another fighter", "Finish Ravening Seduction"};
         }
         case ScreenState::CodedNotesSelect: {
             std::vector<std::string> entries;
@@ -1736,17 +1803,17 @@ void TuiApp::chooseSchemeCard(int selectedMenuIndex) {
     }
 
     if (card.getTitle() == "ROLLING FOG") {
-        pendingFogIndices_.clear();
-        const auto* invisible = dynamic_cast<const InvisibleMan*>(&controller_.currentPlayer().heroFighter());
-        if (invisible) {
-            for (int i = 0; i < 3; ++i) {
-                if (invisible->getFogTokens()[i] != -1) pendingFogIndices_.push_back(i);
-            }
-        }
-        Card played = controller_.currentPlayer().removeCardFromHand(selectedSchemeCardIndex_);
-        controller_.currentPlayer().addToDiscard(std::move(played));
-        controller_.decrementActions();
+        controller_.beginRollingFog(selectedSchemeCardIndex_);
+        pendingFogIndices_ = controller_.getRollingFogTokens();
         state_ = ScreenState::RollingFogSelect;
+        resetSelection();
+        return;
+    }
+
+    if (card.getTitle() == "RAVENING SEDUCTION") {
+        controller_.playScheme(selectedSchemeCardIndex_, schemeChoice_);
+        pendingFighterIds_ = controller_.getRaveningTargets();
+        state_ = ScreenState::RaveningTarget;
         resetSelection();
         return;
     }
@@ -1764,6 +1831,7 @@ void TuiApp::chooseSchemeCard(int selectedMenuIndex) {
             Card played = controller_.currentPlayer().removeCardFromHand(selectedSchemeCardIndex_);
             controller_.currentPlayer().addToDiscard(std::move(played));
             controller_.decrementActions();
+            controller_.endTurnIfNeeded();
             openGameScreen();
             return;
         }
@@ -1963,6 +2031,7 @@ json TuiApp::serializeState() const {
     j["state"] = static_cast<int>(state_);
     j["selected"] = selected_;
     j["selectedAttackerId"] = selectedAttackerId_;
+    j["selectedTargetId"] = selectedTargetId_;
     j["pendingSpaces"] = pendingSpaces_;
     j["pendingFighterIds"] = pendingFighterIds_;
     j["pendingCardIndexes"] = pendingCardIndexes_;
@@ -1977,6 +2046,9 @@ json TuiApp::serializeState() const {
     j["codedNotesCardIndex"] = codedNotesCardIndex_;
     j["stepLightlyCardIndex"] = stepLightlyCardIndex_;
     j["selectedCodedNotesIndices"] = selectedCodedNotesIndices_;
+    j["selectedFogIndex"] = selectedFogIndex_;
+    j["pendingFogDestinations"] = pendingFogDestinations_;
+    j["selectedRaveningFighterId"] = selectedRaveningFighterId_;
     json sc;
     sc["destinationSpace"] = schemeChoice_.destinationSpace;
     sc["targetFighterId"] = schemeChoice_.targetFighterId;
@@ -1990,6 +2062,7 @@ void TuiApp::deserializeState(const json& j) {
     state_ = static_cast<ScreenState>(j["state"].get<int>());
     selected_ = j["selected"].get<int>();
     selectedAttackerId_ = j.value("selectedAttackerId", "");
+    selectedTargetId_ = j.value("selectedTargetId", "");
     pendingSpaces_ = j.value("pendingSpaces", std::vector<int>{});
     pendingFighterIds_ = j.value("pendingFighterIds", std::vector<std::string>{});
     pendingCardIndexes_ = j.value("pendingCardIndexes", std::vector<int>{});
@@ -2003,6 +2076,9 @@ void TuiApp::deserializeState(const json& j) {
     waitingForDestination_ = j.value("waitingForDestination", false);
     codedNotesCardIndex_ = j.value("codedNotesCardIndex", -1);
     stepLightlyCardIndex_ = j.value("stepLightlyCardIndex", -1);
+    selectedFogIndex_ = j.value("selectedFogIndex", -1);
+    pendingFogDestinations_ = j.value("pendingFogDestinations", std::vector<int>{});
+    selectedRaveningFighterId_ = j.value("selectedRaveningFighterId", "");
     if (j.contains("selectedCodedNotesIndices")) {
         selectedCodedNotesIndices_ = j["selectedCodedNotesIndices"].get<std::vector<int>>();
     }
@@ -2015,15 +2091,18 @@ void TuiApp::deserializeState(const json& j) {
     }
 }
 
-void TuiApp::saveTuiState() const {
-    std::string filename = "tui_state.json";
+void TuiApp::saveTuiState(int slot) const {
+    std::string filename = "tui_state" + std::to_string(slot) + ".json";
     std::ofstream file(filename);
     file << serializeState().dump(4);
 }
 
-void TuiApp::loadTuiState() {
-    std::string filename = "tui_state.json";
-    if (!std::ifstream(filename).good()) return;
+void TuiApp::loadTuiState(int slot) {
+    std::string filename = "tui_state" + std::to_string(slot) + ".json";
+    if (!std::ifstream(filename).good()) {
+        filename = "tui_state.json";
+        if (!std::ifstream(filename).good()) return;
+    }
     std::ifstream file(filename);
     json j;
     file >> j;

@@ -88,8 +88,7 @@ std::vector<Card> DeckFactory::createDeckForDracula() const {
             attackValue += bonus;
         });
 
-    addCopies(2, "MISTFORM", Character::Dracula, CardType::Scheme, -1, -1, 2, Timing::None,
-        nullptr);
+    addCopies(2, "MISTFORM", Character::Dracula, CardType::Scheme, -1, -1, 2, Timing::None, nullptr);
 
     addCopies(2, "AMBUSH", Character::Any, CardType::Attack, 2, -1, 3, Timing::Immediately,
         [](Fighter&, Fighter&, GameController& controller, int& attackValue, int&) {

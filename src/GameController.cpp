@@ -1688,6 +1688,24 @@ void GameController::handleVanish(int handIndex) {
     }
 }
 
+void GameController::beginRollingFog(int handIndex) {
+    pushUndoState();
+    try {
+        Player& player = currentPlayer();
+        Card played = player.removeCardFromHand(handIndex);
+        player.addToDiscard(std::move(played));
+
+        PendingRollingFogChoice choice;
+        choice.playerIndex = player.id();
+        choice.step = 0;
+        choice.selectedFogIndex = -1;
+        pendingRollingFogChoice_ = choice;
+    } catch (...) {
+        if (!undoStack_.empty()) undoStack_.pop_back();
+        throw;
+    }
+}
+
 void GameController::placeVanishedInvisibleMan(int spaceId) {
     if (!pendingVanishedPlacement_) {
         throw RuleViolation("Invisible Man is not waiting to be placed.");
@@ -1785,12 +1803,10 @@ std::vector<int> GameController::getThirstDestinations(const std::string& defend
     });
 }
 
-void GameController::saveGame(int slot) {
-    if (slot < 1 || slot > 3) {
-        slot = findEmptySlot();
-    }
-    std::string filename = "save" + std::to_string(slot) + ".json";
+void GameController::saveGame(int) {
+    rotateSaveFiles();
 
+    std::string filename = "save1.json";
     json j = createFullSnapshot();
     j["version"] = 2;
     j["timestamp"] = std::time(nullptr);
@@ -1818,15 +1834,23 @@ std::vector<std::pair<int, std::string>> GameController::getSaveSlots() const {
     std::vector<std::pair<int, std::string>> result;
     for (int i = 1; i <= 3; ++i) {
         std::string filename = "save" + std::to_string(i) + ".json";
-        if (std::ifstream(filename).good()) {
-            std::ifstream file(filename);
-            json j;
-            file >> j;
-            std::string info = "Slot " + std::to_string(i) + ": ";
-            if (j.contains("players") && j["players"].size() > 0) {
-                info += j["players"][0]["name"].get<std::string>() + " - Turn " + std::to_string(j["turnNumber"].get<int>());
+        std::ifstream file(filename);
+        if (file.good()) {
+            try {
+                json j;
+                file >> j;
+                std::string info = "Slot " + std::to_string(i) + ": ";
+                if (j.contains("players") && j["players"].size() > 1) {
+                    info += j["players"][0]["name"].get<std::string>() + " vs " + 
+                            j["players"][1]["name"].get<std::string>() + " (Turn " + 
+                            std::to_string(j["turnNumber"].get<int>()) + ")";
+                } else {
+                    info += "Saved Match";
+                }
+                result.push_back({i, info});
+            } catch (...) {
+                result.push_back({i, "Slot " + std::to_string(i) + " (Saved Match)"});
             }
-            result.push_back({i, info});
         }
     }
     return result;
@@ -1933,6 +1957,31 @@ json GameController::createFullSnapshot() const {
         json pc;
         pc["playerIndex"] = pendingCodedNotesChoice_->playerIndex;
         j["pendingCodedNotesChoice"] = pc;
+    }
+
+    if (pendingLurkingChoice_.has_value()) {
+        json pl;
+        pl["playerIndex"] = pendingLurkingChoice_->playerIndex;
+        pl["step"] = pendingLurkingChoice_->step;
+        pl["selectedFogIndex"] = pendingLurkingChoice_->selectedFogIndex;
+        pl["choice"] = pendingLurkingChoice_->choice;
+        j["pendingLurkingChoice"] = pl;
+    }
+
+    if (pendingSlipAwayChoice_.has_value()) {
+        json ps;
+        ps["playerIndex"] = pendingSlipAwayChoice_->playerIndex;
+        ps["selectedFogIndex"] = pendingSlipAwayChoice_->selectedFogIndex;
+        ps["step"] = pendingSlipAwayChoice_->step;
+        j["pendingSlipAwayChoice"] = ps;
+    }
+
+    if (pendingRollingFogChoice_.has_value()) {
+        json pr;
+        pr["playerIndex"] = pendingRollingFogChoice_->playerIndex;
+        pr["selectedFogIndex"] = pendingRollingFogChoice_->selectedFogIndex;
+        pr["step"] = pendingRollingFogChoice_->step;
+        j["pendingRollingFogChoice"] = pr;
     }
 
     json playersJson = json::array();
@@ -2058,6 +2107,34 @@ void GameController::restoreFullSnapshot(const json& j) {
         PendingCodedNotesChoice choice;
         choice.playerIndex = pc["playerIndex"].get<int>();
         pendingCodedNotesChoice_ = choice;
+    }
+
+    if (j.contains("pendingLurkingChoice")) {
+        const auto& pl = j["pendingLurkingChoice"];
+        PendingLurkingChoice choice;
+        choice.playerIndex = pl["playerIndex"].get<int>();
+        choice.step = pl["step"].get<int>();
+        choice.selectedFogIndex = pl["selectedFogIndex"].get<int>();
+        choice.choice = pl["choice"].get<int>();
+        pendingLurkingChoice_ = choice;
+    }
+
+    if (j.contains("pendingSlipAwayChoice")) {
+        const auto& ps = j["pendingSlipAwayChoice"];
+        PendingSlipAwayChoice choice;
+        choice.playerIndex = ps["playerIndex"].get<int>();
+        choice.selectedFogIndex = ps["selectedFogIndex"].get<int>();
+        choice.step = ps["step"].get<int>();
+        pendingSlipAwayChoice_ = choice;
+    }
+
+    if (j.contains("pendingRollingFogChoice")) {
+        const auto& pr = j["pendingRollingFogChoice"];
+        PendingRollingFogChoice choice;
+        choice.playerIndex = pr["playerIndex"].get<int>();
+        choice.selectedFogIndex = pr["selectedFogIndex"].get<int>();
+        choice.step = pr["step"].get<int>();
+        pendingRollingFogChoice_ = choice;
     }
 
     for (const auto& pJson : j["players"]) {
