@@ -104,6 +104,7 @@ private:
     void renderSidePanel(sf::RenderWindow& window, int playerIndex, sf::Vector2f origin);
     void renderCardBackIcon(sf::RenderWindow& window, int playerIndex, sf::Vector2f origin);
     void renderHandOverlay(sf::RenderWindow& window, int playerIndex);
+    void renderDiscardOverlay(sf::RenderWindow& window, int playerIndex);
     void renderControlRow(sf::RenderWindow& window);
     void renderStatus(sf::RenderWindow& window);
     void renderGameOver(sf::RenderWindow& window);
@@ -111,6 +112,7 @@ private:
 
     void enterMode(Mode mode);
     void rebuildActionButtons();
+    
     void rebuildChipButtons(const std::vector<std::string>& labels, std::function<void(int)> onSelect,
                             bool vertical = false);
     void clearInteractiveWidgets();
@@ -184,7 +186,7 @@ private:
     void setError(const std::string& message);
 
     std::string cardStatsLine(const Card& card) const;
-
+    
     std::string cardListLabel(const Card& card) const;
     std::string cardImagePath(const Card& card) const;
     std::string characterImagePath(const Fighter& fighter) const;
@@ -228,11 +230,18 @@ private:
     bool hoveringCardBackRight_ = false;
     std::optional<int> openedHandPlayer_;
 
+    
+    sf::FloatRect discardBoundsLeft_;
+    sf::FloatRect discardBoundsRight_;
+    std::optional<int> openedDiscardPlayer_;
+
     std::set<std::string> missingTexturePaths_;
 
     int pendingBoostIndex_ = -1;
     int pendingFogTokenIndex_ = -1;
     std::string selectedFighterId_;
+    
+    bool maneuverBegun_ = false;
     int selectedAttackCardIndex_ = -1;
     std::string selectedTargetId_;
     int pendingSchemeHandIndex_ = -1;
