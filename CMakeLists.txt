@@ -27,9 +27,13 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(json)
 
-
-find_package(SFML 3 COMPONENTS Graphics Window System REQUIRED)
-
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+FetchContent_Declare(
+    SFML
+    GIT_REPOSITORY https://github.com/SFML/SFML.git
+    GIT_TAG 3.0.0
+)
+FetchContent_MakeAvailable(SFML)
 
 set(GAME_LOGIC_SOURCES
     src/Board.cpp
