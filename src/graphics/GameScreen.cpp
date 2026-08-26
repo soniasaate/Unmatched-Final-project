@@ -14,20 +14,6 @@
 namespace unmatched::gfx {
 
 namespace {
-std::string slugify(const std::string& text) {
-    std::string result;
-    result.reserve(text.size());
-    for (char c : text) {
-        if (std::isalnum(static_cast<unsigned char>(c))) {
-            result += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        } else if (c == ' ' || c == '-' || c == '_') {
-            if (!result.empty() && result.back() != '_') result += '_';
-        }
-    }
-    while (!result.empty() && result.back() == '_') result.pop_back();
-    return result;
-}
-
 
 const sf::Color kBgDark(14, 13, 12);
 const sf::Color kPanelFill(22, 20, 18, 235);
@@ -40,6 +26,18 @@ const sf::Color kAccentInvisible(30, 60, 120);
 const sf::Color kAccentSherlock(190, 160, 30);
 const sf::Color kAccentNeutral(95, 90, 85);
 
+sf::Color getZoneColor(char zone) {
+    switch (zone) {
+        case 'b': return sf::Color(41, 128, 185);
+        case 'r': return sf::Color(160, 82, 45);
+        case 'p': return sf::Color(142, 68, 173);
+        case 'y': return sf::Color(218, 165, 32);
+        case 'g': return sf::Color(39, 174, 96);
+        case 'd': return sf::Color(30, 45, 90);
+        case 'e': return sf::Color(127, 140, 141);
+        default:  return sf::Color(80, 80, 80);
+    }
+}
 
 constexpr float kTopBarH = 46.f;
 constexpr float kPanelX_L = 12.f, kPanelX_R = 1018.f, kPanelW = 250.f, kPanelY = 54.f, kPanelH = 700.f;
@@ -208,8 +206,6 @@ void GameScreen::computeSpacePositions() {
    
     constexpr float padX = 0.045f;
     constexpr float padY = 0.10f;
-    const float usableW = boardBounds_.size.x * (1.f - 2.f * padX);
-    const float usableH = boardBounds_.size.y * (1.f - 2.f * padY);
     const float colSpan = static_cast<float>(std::max(1, maxCol - minCol));
     const float rowSpan = static_cast<float>(std::max(1, maxRow - minRow));
 
@@ -236,7 +232,7 @@ void GameScreen::handleEvent(const sf::Event& event) {
 
     try {
         
-        if (const auto* moved = event.getIf<sf::Event::MouseMoved>()) {
+        if (event.is<sf::Event::MouseMoved>()) {
             for (auto& b : actionButtons_) b.handleEvent(event);
             for (auto& b : chipButtons_) b.handleEvent(event);
             if (cancelButton_) cancelButton_->handleEvent(event);
@@ -648,21 +644,56 @@ void GameScreen::renderBoard(sf::RenderWindow& window) {
         for (const auto& s : spaces) {
             auto it = spacePositions_.find(s.id());
             if (it == spacePositions_.end()) continue;
-            sf::CircleShape circle(9.f);
-            circle.setOrigin(sf::Vector2f(9.f, 9.f));
-            circle.setPosition(it->second);
-            circle.setFillColor(sf::Color(25, 23, 21, 220));
-            circle.setOutlineThickness(1.5f);
-            circle.setOutlineColor(sf::Color(100, 94, 86));
-            window.draw(circle);
+
+            const auto& zones = s.zones();
+            float radius = 13.f;
+
+            if (zones.size() == 1) {
+                sf::CircleShape circle(radius);
+                circle.setOrigin(sf::Vector2f(radius, radius));
+                circle.setPosition(it->second);
+                circle.setFillColor(getZoneColor(zones[0]));
+                circle.setOutlineThickness(2.f);
+                circle.setOutlineColor(s.hasSecretPassage() ? sf::Color::Cyan : (s.startSlot() > 0 ? sf::Color::Yellow : sf::Color(200, 200, 200)));
+                window.draw(circle);
+            } else {
+                sf::VertexArray fan(sf::PrimitiveType::TriangleFan);
+                
+                sf::Vertex centerVertex;
+                centerVertex.position = it->second;
+                centerVertex.color = sf::Color::White;
+                fan.append(centerVertex);
+
+                float angleStep = 360.f / static_cast<float>(zones.size());
+                for (size_t z = 0; z < zones.size(); ++z) {
+                    sf::Color zColor = getZoneColor(zones[z]);
+                    for (float a = z * angleStep; a <= (z + 1) * angleStep + 0.1f; a += 5.f) {
+                        float rad = a * 3.14159265f / 180.f;
+                        sf::Vertex edgeVertex;
+                        edgeVertex.position = it->second + sf::Vector2f(std::cos(rad) * radius, std::sin(rad) * radius);
+                        edgeVertex.color = zColor;
+                        fan.append(edgeVertex);
+                    }
+                }
+                window.draw(fan);
+
+                sf::CircleShape ring(radius);
+                ring.setOrigin(sf::Vector2f(radius, radius));
+                ring.setPosition(it->second);
+                ring.setFillColor(sf::Color::Transparent);
+                ring.setOutlineThickness(2.f);
+                ring.setOutlineColor(s.hasSecretPassage() ? sf::Color::Cyan : (s.startSlot() > 0 ? sf::Color::Yellow : sf::Color(200, 200, 200)));
+                window.draw(ring);
+            }
 
             sf::Text number(app_.resources().getFont("assets/fonts/title_font.ttf"));
             number.setString(std::to_string(s.id()));
             number.setCharacterSize(10);
-            number.setFillColor(kTextLight);
+            number.setFillColor(sf::Color::White);
+            number.setStyle(sf::Text::Bold);
             sf::FloatRect b = number.getLocalBounds();
             number.setOrigin(sf::Vector2f(b.position.x + b.size.x / 2.f, b.position.y + b.size.y / 2.f));
-            number.setPosition(it->second + sf::Vector2f(0.f, -16.f));
+            number.setPosition(it->second + sf::Vector2f(0.f, -18.f));
             window.draw(number);
         }
     }
@@ -957,7 +988,6 @@ void GameScreen::renderHandOverlay(sf::RenderWindow& window, int playerIndex) {
     float gap = 9.f;
     const int perRow = 7;
     const int count = static_cast<int>(hand.size());
-    const int rows = std::max(1, (count + perRow - 1) / perRow);
     const int firstRowCount = std::min(count, perRow);
     const float rowWidth = firstRowCount * cardW + std::max(0, firstRowCount - 1) * gap;
     const float startX = (static_cast<float>(app_.window().getSize().x) - rowWidth) / 2.f;
@@ -1854,7 +1884,18 @@ void GameScreen::onSchemeCardChosen(int handIndex) {
         enterMode(Mode::SchemeSelectNamedValue);
         return;
     }
-
+    
+    if (card.getTitle() == "RAVENING SEDUCTION") {
+        try {
+            controller_.playScheme(pendingSchemeHandIndex_, pendingSchemeChoice_);
+            setStatus("Ravening Seduction: All fighters moved.");
+        } catch (const std::exception& e) {
+            setError(e.what());
+        }
+        pendingSchemeHandIndex_ = -1;
+        enterMode(Mode::Idle);
+        return;
+    }
    
     if (card.getTitle() == "VANISH") {
         try {

@@ -52,15 +52,11 @@ set(GAME_LOGIC_SOURCES
 
 
 set(GRAPHICAL_SOURCES
-    src/graphics/Application.cpp
-    src/graphics/Button.cpp
-    src/graphics/ResourceManager.cpp
     src/graphics/MainMenuScreen.cpp
     src/graphics/AgeSetupScreen.cpp
     src/graphics/FighterSelectScreen.cpp
     src/graphics/StartSelectScreen.cpp
     src/graphics/GameScreen.cpp
-    
 )
 
 
