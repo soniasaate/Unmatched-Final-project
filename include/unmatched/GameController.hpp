@@ -49,6 +49,7 @@ struct PendingFogChoice {
 
 struct PendingConfoundChoice {
     int playerIndex = -1;
+    int invisiblePlayerIndex = -1;
     bool opponentDecided = false;
     bool opponentWantsToDiscard = false;
     bool fogMoveDone = false;
@@ -177,9 +178,17 @@ public:
     void addAction(int count = 1);
     void placeVanishedInvisibleMan(int spaceId);
     std::vector<int> getValidPlacementSpacesForVanished() const;
-    bool hasPendingVanishedPlacement() const { return pendingVanishedPlacement_; }
-    void clearPendingVanishedPlacement() { pendingVanishedPlacement_ = false; }
-    void setPendingVanishedPlacement(bool value) { pendingVanishedPlacement_ = value; }
+    bool hasPendingVanishedPlacement() const {
+        return pendingVanishedPlacement_ && pendingVanishedPlayerIndex_ == currentPlayerIndex_;
+    }
+    void clearPendingVanishedPlacement() {
+        pendingVanishedPlacement_ = false;
+        pendingVanishedPlayerIndex_ = -1;
+    }
+    void setPendingVanishedPlacement(bool value) {
+        pendingVanishedPlacement_ = value;
+        if (!value) pendingVanishedPlayerIndex_ = -1;
+    }
     const std::string& getStudyMethodsHandInfo() const { return studyMethodsHandInfo_; }
     void clearStudyMethodsHandInfo() { studyMethodsHandInfo_.clear(); }
     void setConfoundSchemeCardIndex(int index) { confoundSchemeCardIndex_ = index; }
@@ -306,6 +315,7 @@ private:
     int maxMovementPoints_;
     std::deque<PendingMovementChoice> pendingOptionalMovements_;
     bool pendingVanishedPlacement_;
+    int pendingVanishedPlayerIndex_;
     std::string studyMethodsHandInfo_;
     int confoundSchemeCardIndex_ = -1;
     std::string confirmSuspicionHandInfo_;

@@ -10,6 +10,7 @@
 #include <climits>
 #include <sstream>
 #include <fstream>
+#include <unordered_map>
 
 namespace unmatched::gfx {
 
@@ -50,7 +51,7 @@ constexpr float kCardBackW = 74.f, kCardBackH = 100.f;
 }
 
 GameScreen::UiButton::UiButton(sf::Font& font, const std::string& label,
-                              sf::Vector2f position, sf::Vector2f size)
+                               sf::Vector2f position, sf::Vector2f size)
     : text(font), background(size), bounds(position, size) {
     text.setString(label);
     text.setCharacterSize(12);
@@ -87,8 +88,6 @@ void GameScreen::UiButton::render(sf::RenderWindow& window) {
     window.draw(background);
     window.draw(text);
 }
-
-
 
 std::unique_ptr<Fighter> GameScreen::createFighterByIndex(int index) const {
     switch (index) {
@@ -153,9 +152,8 @@ void GameScreen::setupCommonVisuals() {
         static_cast<float>(windowSize.y) / static_cast<float>(textureSize.y)));
     background_.setColor(sf::Color(255, 255, 255, 35));
 
-    
     try {
-        auto& tex = app_.resources().getTexture("assets/images/board/baskerville_manor.png");
+        auto& tex = app_.resources().getTexture("assets/images/board_baskerville.png");
         boardSprite_ = std::make_unique<sf::Sprite>(tex);
         boardBounds_ = sf::FloatRect(sf::Vector2f(kBoardX, kBoardY), sf::Vector2f(kBoardW, kBoardH));
         const auto size = tex.getSize();
@@ -203,7 +201,6 @@ void GameScreen::computeSpacePositions() {
         maxCol = std::max(maxCol, s.column());
     }
 
-   
     constexpr float padX = 0.045f;
     constexpr float padY = 0.10f;
     const float colSpan = static_cast<float>(std::max(1, maxCol - minCol));
@@ -218,8 +215,6 @@ void GameScreen::computeSpacePositions() {
     }
 }
 
-
-
 void GameScreen::handleEvent(const sf::Event& event) {
     if (mode_ == Mode::GameOver) {
         if (backToMenuButton_) backToMenuButton_->handleEvent(event);
@@ -230,38 +225,63 @@ void GameScreen::handleEvent(const sf::Event& event) {
         return;
     }
 
+    if (const auto* keyEvent = event.getIf<sf::Event::KeyPressed>()) {
+        if (keyEvent->code == sf::Keyboard::Key::Z) {
+            if (mode_ != Mode::Idle && mode_ != Mode::GameOver && mode_ != Mode::InfoPopup) {
+                maneuverBegun_ = false;
+                pendingSchemeHandIndex_ = -1;
+                selectedAttackCardIndex_ = -1;
+                selectedFighterId_.clear();
+                selectedTargetId_.clear();
+                codedNotesSelection_.clear();
+                enterMode(Mode::Idle);
+                setStatus("Action canceled.");
+            } 
+            else if (mode_ == Mode::Idle) {
+                if (controller_.canUndo()) {
+                    try {
+                        controller_.undoLastAction();
+                        setStatus("Last action undone.");
+                        enterMode(Mode::Idle);
+                    } catch (const std::exception& e) {
+                        setError(std::string("Undo failed: ") + e.what());
+                    }
+                } else {
+                    setError("Cannot undo: start of turn reached or action already resolved.");
+                }
+            }
+            return;
+        }
+        if (keyEvent->code == sf::Keyboard::Key::S) {
+            onSaveClicked();
+            return;
+        }
+        if (keyEvent->code == sf::Keyboard::Key::L) {
+            onLoadClicked();
+            return;
+        }
+    }
+
     try {
-        
-        if (event.is<sf::Event::MouseMoved>()) {
+        if (const auto* moved = event.getIf<sf::Event::MouseMoved>()) {
+            (void)moved;
             for (auto& b : actionButtons_) b.handleEvent(event);
             for (auto& b : chipButtons_) b.handleEvent(event);
-            if (cancelButton_) cancelButton_->handleEvent(event);
         } else if (const auto* released = event.getIf<sf::Event::MouseButtonReleased>()) {
             if (released->button == sf::Mouse::Button::Left) {
-                const sf::Vector2f clickPos(
-                    static_cast<float>(released->position.x),
-                    static_cast<float>(released->position.y));
+                const sf::Vector2f clickPos(static_cast<float>(released->position.x), static_cast<float>(released->position.y));
 
-                
-            
                 for (auto& b : actionButtons_) {
                     if (b.bounds.contains(clickPos)) {
-                        auto callback = b.onClick;
-                        if (callback) callback();
+                        if (b.onClick) b.onClick();
                         return;
                     }
                 }
                 for (auto& b : chipButtons_) {
                     if (b.bounds.contains(clickPos)) {
-                        auto callback = b.onClick;
-                        if (callback) callback();
+                        if (b.onClick) b.onClick();
                         return;
                     }
-                }
-                if (cancelButton_ && cancelButton_->bounds.contains(clickPos)) {
-                    auto callback = cancelButton_->onClick;
-                    if (callback) callback();
-                    return;
                 }
             }
         }
@@ -269,15 +289,10 @@ void GameScreen::handleEvent(const sf::Event& event) {
         setError(std::string("UI error: ") + e.what());
         enterMode(Mode::Idle);
         return;
-    } catch (...) {
-        setError("UI error: unknown exception.");
-        enterMode(Mode::Idle);
-        return;
     }
 
     if (const auto* moved = event.getIf<sf::Event::MouseMoved>()) {
-        lastMousePos_ = sf::Vector2f(static_cast<float>(moved->position.x),
-                                     static_cast<float>(moved->position.y));
+        lastMousePos_ = sf::Vector2f(static_cast<float>(moved->position.x), static_cast<float>(moved->position.y));
         hoveringCardBackLeft_ = cardBackBoundsLeft_.contains(lastMousePos_);
         hoveringCardBackRight_ = cardBackBoundsRight_.contains(lastMousePos_);
         hoveredCard_.reset();
@@ -292,17 +307,13 @@ void GameScreen::handleEvent(const sf::Event& event) {
     const auto* released = event.getIf<sf::Event::MouseButtonReleased>();
     if (!released || released->button != sf::Mouse::Button::Left) return;
 
-    sf::Vector2f pos(static_cast<float>(released->position.x),
-                     static_cast<float>(released->position.y));
+    sf::Vector2f pos(static_cast<float>(released->position.x), static_cast<float>(released->position.y));
 
-    
     if (activeHandSelection_) {
         for (const auto& view : handCardViews_) {
             if (view.playerIndex != activeHandSelection_->playerIndex) continue;
             if (!view.bounds.contains(pos)) continue;
-            const bool legal = std::find(activeHandSelection_->legalIndices.begin(),
-                                         activeHandSelection_->legalIndices.end(),
-                                         view.handIndex) != activeHandSelection_->legalIndices.end();
+            const bool legal = std::find(activeHandSelection_->legalIndices.begin(), activeHandSelection_->legalIndices.end(), view.handIndex) != activeHandSelection_->legalIndices.end();
             if (legal) {
                 auto callback = activeHandSelection_->onChosen;
                 callback(view.handIndex);
@@ -313,7 +324,6 @@ void GameScreen::handleEvent(const sf::Event& event) {
         }
     }
 
-    
     if (cardBackBoundsLeft_.contains(pos)) {
         openedHandPlayer_ = (openedHandPlayer_ && *openedHandPlayer_ == 0) ? std::optional<int>{} : std::optional<int>{0};
         openedDiscardPlayer_.reset();
@@ -324,8 +334,6 @@ void GameScreen::handleEvent(const sf::Event& event) {
         openedDiscardPlayer_.reset();
         return;
     }
-
-    
     if (discardBoundsLeft_.contains(pos)) {
         openedDiscardPlayer_ = (openedDiscardPlayer_ && *openedDiscardPlayer_ == 0) ? std::optional<int>{} : std::optional<int>{0};
         openedHandPlayer_.reset();
@@ -367,6 +375,14 @@ void GameScreen::checkAutoPrompts() {
         if (mode_ != Mode::CodedNotesSelectCards) {
             codedNotesSelection_.clear();
             enterMode(Mode::CodedNotesSelectCards);
+        }
+        return;
+    }
+    if (controller_.hasPendingRaveningChoice()) {
+        if (mode_ != Mode::RaveningTarget &&
+            mode_ != Mode::RaveningDestination &&
+            mode_ != Mode::RaveningContinue) {
+            enterMode(Mode::RaveningTarget);
         }
         return;
     }
@@ -419,16 +435,16 @@ void GameScreen::checkAutoPrompts() {
         }
         return;
     }
+    if (controller_.hasPendingOptionalMovement()) {
+        if (mode_ != Mode::OptionalMovementDestination) enterMode(Mode::OptionalMovementDestination);
+        return;
+    }
     if (controller_.hasPendingFogChoice()) {
         if (mode_ != Mode::FogTokenSelect && mode_ != Mode::FogTokenDestination) enterMode(Mode::FogTokenSelect);
         return;
     }
     if (controller_.hasPendingVanishedPlacement()) {
         if (mode_ != Mode::VanishedPlacement) enterMode(Mode::VanishedPlacement);
-        return;
-    }
-    if (controller_.hasPendingOptionalMovement()) {
-        if (mode_ != Mode::OptionalMovementDestination) enterMode(Mode::OptionalMovementDestination);
         return;
     }
     if (controller_.currentPlayerMustDiscardToLimit()) {
@@ -438,8 +454,6 @@ void GameScreen::checkAutoPrompts() {
         }
     }
 }
-
-
 
 sf::Texture* GameScreen::tryGetTexture(const std::string& path) {
     if (missingTexturePaths_.count(path)) return nullptr;
@@ -497,7 +511,6 @@ std::string GameScreen::cardImagePath(const Card& card) const {
         {"study methods","study-methods.png"},{"the game is afoot","the-game-is-afoot.png"}
     };
 
-    
     if (normalized == "feint") {
         const std::string dracula = "assets/images/cards/dracula/feint (1).png";
         const std::string sherlock = "assets/images/cards/sherlock/feint (2).png";
@@ -515,7 +528,6 @@ std::string GameScreen::cardImagePath(const Card& card) const {
         filename += ".png";
     }
 
-    
     const std::array<std::string,3> folders = {
         "dracula", "sherlock", "invisible_man"
     };
@@ -524,7 +536,6 @@ std::string GameScreen::cardImagePath(const Card& card) const {
         if (exists(p)) return p;
     }
 
-    
     return "assets/images/cards/dracula/" + filename;
 }
 
@@ -535,8 +546,6 @@ std::string GameScreen::characterImagePath(const Fighter& fighter) const {
 int GameScreen::indexOfPlayer(const Player& player) const {
     return player.id();
 }
-
-
 
 void GameScreen::render(sf::RenderWindow& window) {
     window.clear(kBgDark);
@@ -564,7 +573,6 @@ void GameScreen::render(sf::RenderWindow& window) {
         renderDiscardOverlay(window, *openedDiscardPlayer_);
     }
 
-    
     renderControlRow(window);
     renderStatus(window);
 
@@ -592,7 +600,6 @@ void GameScreen::renderTopBar(sf::RenderWindow& window) {
     titleText_.setPosition(sf::Vector2f(static_cast<float>(app_.window().getSize().x) / 2.f, kTopBarH / 2.f));
     window.draw(titleText_);
 
-    
     int totalActions = 2;
     int remaining = controller_.actionsRemaining();
     float dotRadius = 8.f;
@@ -658,7 +665,7 @@ void GameScreen::renderBoard(sf::RenderWindow& window) {
                 window.draw(circle);
             } else {
                 sf::VertexArray fan(sf::PrimitiveType::TriangleFan);
-                
+
                 sf::Vertex centerVertex;
                 centerVertex.position = it->second;
                 centerVertex.color = sf::Color::White;
@@ -698,7 +705,6 @@ void GameScreen::renderBoard(sf::RenderWindow& window) {
         }
     }
 
-    
     for (int spaceId : highlightedSpaces_) {
         auto it = spacePositions_.find(spaceId);
         if (it == spacePositions_.end()) continue;
@@ -715,7 +721,6 @@ void GameScreen::renderBoard(sf::RenderWindow& window) {
 }
 
 void GameScreen::renderFighterTokens(sf::RenderWindow& window) {
-   
     sf::Font& font = app_.resources().getFont("assets/fonts/title_font.ttf");
     const auto tokens = controller_.occupantTokens();
     for (const auto& [spaceId, label] : tokens) {
@@ -740,7 +745,6 @@ void GameScreen::renderFighterTokens(sf::RenderWindow& window) {
         window.draw(text);
     }
 
-   
     for (const auto& player : controller_.players()) {
         for (const auto& fighterPtr : player.fighters()) {
             const Fighter& fighter = *fighterPtr;
@@ -764,7 +768,6 @@ void GameScreen::renderFighterTokens(sf::RenderWindow& window) {
 }
 
 void GameScreen::renderFogMarkersOnBoard(sf::RenderWindow& window) {
-    
     (void)window;
 }
 
@@ -781,7 +784,6 @@ void GameScreen::renderSidePanel(sf::RenderWindow& window, int playerIndex, sf::
     panel.setOutlineColor(active ? accent : kMetalOutline);
     window.draw(panel);
 
-    
     sf::RectangleShape portraitFrame(sf::Vector2f(kPanelW - 20.f, kPortraitH));
     portraitFrame.setPosition(sf::Vector2f(origin.x + 10.f, origin.y + 10.f));
     portraitFrame.setFillColor(sf::Color(10, 9, 8));
@@ -811,7 +813,6 @@ void GameScreen::renderSidePanel(sf::RenderWindow& window, int playerIndex, sf::
         window.draw(placeholder);
     }
 
-    
     float infoY = origin.y + 10.f + kPortraitH + 8.f;
     std::ostringstream oss;
     oss << hero.displayName() << (hero.defeated() ? "  [DOWN]" : "") << "\n"
@@ -830,14 +831,12 @@ void GameScreen::renderSidePanel(sf::RenderWindow& window, int playerIndex, sf::
     infoText.setPosition(sf::Vector2f(origin.x + 10.f, infoY));
     window.draw(infoText);
 
-    
     float sepY = infoY + 92.f;
     sf::RectangleShape sep(sf::Vector2f(kPanelW - 20.f, 2.f));
     sep.setPosition(sf::Vector2f(origin.x + 10.f, sepY));
     sep.setFillColor(sf::Color(70, 64, 58));
     window.draw(sep);
 
-    
     float sideY = sepY + 10.f;
     if (const auto* invisible = dynamic_cast<const InvisibleMan*>(&hero)) {
         sf::RectangleShape fogBox(sf::Vector2f(kPanelW - 20.f, 70.f));
@@ -914,11 +913,9 @@ void GameScreen::renderSidePanel(sf::RenderWindow& window, int playerIndex, sf::
         }
     }
 
-    
     renderCardBackIcon(window, playerIndex, sf::Vector2f(origin.x + (kPanelW - kCardBackW) / 2.f,
                                                           origin.y + kPanelH - kCardBackH - 10.f));
 
-    
     {
         sf::Text discardLabel(app_.resources().getFont("assets/fonts/title_font.ttf"));
         discardLabel.setString("[ View Discard (" + std::to_string(player.discardPile().size()) + ") ]");
@@ -1132,7 +1129,6 @@ void GameScreen::renderControlRow(sf::RenderWindow& window) {
     }
     for (auto& b : actionButtons_) b.render(window);
     for (auto& b : chipButtons_) b.render(window);
-    if (cancelButton_) cancelButton_->render(window);
 }
 
 void GameScreen::renderStatus(sf::RenderWindow& window) {
@@ -1184,14 +1180,11 @@ void GameScreen::renderInfoPopup(sf::RenderWindow& window) {
     if (infoOkButton_) infoOkButton_->render(window);
 }
 
-
-
 void GameScreen::clearInteractiveWidgets() {
     chipButtons_.clear();
     chipListVertical_ = false;
     highlightedSpaces_.clear();
     selectableFighterIds_.clear();
-    cancelButton_.reset();
     activeHandSelection_.reset();
 }
 
@@ -1200,7 +1193,7 @@ void GameScreen::rebuildActionButtons() {
     sf::Font& font = app_.resources().getFont("assets/fonts/title_font.ttf");
     const sf::Color accent = accentColorFor(controller_.currentPlayer().heroFighter());
     float totalW = kBoardW;
-    int count = 7 + (controller_.draculaAbilityAvailable() ? 1 : 0);
+    int count = 10 + (controller_.draculaAbilityAvailable() ? 1 : 0);
     float w = (totalW - static_cast<float>(count - 1) * 8.f) / static_cast<float>(count);
     float x = kBoardX, y = kControlRowY, h = kControlRowH, gap = 8.f;
 
@@ -1220,6 +1213,9 @@ void GameScreen::rebuildActionButtons() {
     addButton("Discard", [this]() { onDiscardClicked(); }, false);
     addButton("Undo", [this]() { onUndoClicked(); }, false);
     addButton("Save", [this]() { onSaveClicked(); }, false);
+    addButton("Load", [this]() { onLoadClicked(); }, false);
+    addButton("Help", [this]() { onHelpClicked(); }, false);
+    addButton("Menu", [this]() { onMainMenuClicked(); }, false);
     addButton("End Turn", [this]() { onEndTurnClicked(); }, false);
 }
 
@@ -1231,7 +1227,6 @@ void GameScreen::rebuildChipButtons(const std::vector<std::string>& labels,
     const float h = vertical ? 32.f : 34.f;
 
     if (vertical) {
-        
         const float w = 480.f, gap = 6.f;
         const float x = boardBounds_.position.x + (boardBounds_.size.x - w) / 2.f;
         const float y = boardBounds_.position.y + 16.f;
@@ -1256,10 +1251,6 @@ void GameScreen::rebuildChipButtons(const std::vector<std::string>& labels,
             chipButtons_.back().accent = sf::Color(155, 145, 130);
         }
     }
-
-    cancelButton_.emplace(font, "Cancel", sf::Vector2f(kBoardX, kControlRowY), sf::Vector2f(88.f, kControlRowH));
-    cancelButton_->onClick = [this]() { onCancelClicked(); };
-    cancelButton_->accent = sf::Color(130, 125, 120);
 }
 
 void GameScreen::enterMode(Mode mode) {
@@ -1277,37 +1268,32 @@ void GameScreen::enterMode(Mode mode) {
             break;
 
         case Mode::ManeuverSelectFighter: {
-            std::vector<std::string> ids;
-            if (!maneuverBegun_) {
-               
-                for (const Fighter* f : controller_.currentPlayer().aliveFighters()) {
-                    if (f->spaceId() != -1) ids.push_back(f->id());
-                }
-            } else {
-                ids = controller_.movableCurrentFighterIds();
-            }
+            std::vector<std::string> ids = controller_.movableCurrentFighterIds();
             selectableFighterIds_ = ids;
             std::vector<std::string> labels;
+            int totalRemaining = 0;
+            for (const auto& id : ids) totalRemaining += std::max(0, controller_.remainingMovementForFighter(id));
+            if (maneuverBegun_) labels.push_back("Finish movement (" + std::to_string(totalRemaining) + " moves left)");
             for (auto& id : ids) labels.push_back(fighterLabel(id));
             if (labels.empty()) {
-                if (maneuverBegun_) {
-                    try {
-                        controller_.finishManeuver();
-                        setStatus("Maneuver finished: no fighter had a legal move.");
-                    } catch (const std::exception& e) {
-                        setError(e.what());
-                    }
-                } else {
-                    setError("No fighter is available to move.");
+                try {
+                    controller_.finishManeuver();
+                    setStatus("Maneuver finished: no fighter had a legal move.");
+                } catch (const std::exception& e) {
+                    setError(e.what());
                 }
                 maneuverBegun_ = false;
                 enterMode(Mode::Idle);
                 return;
             }
-            rebuildChipButtons(labels, [this, ids](int i) { onManeuverFighterChosen(i, ids); });
-            setStatus(maneuverBegun_
-                ? "Click a highlighted fighter on the board, or use the button below."
-                : "Choose which fighter you want to move.");
+            rebuildChipButtons(labels, [this, ids](int i) {
+                if (i == 0) {
+                    onFinishManeuverClicked();
+                    return;
+                }
+                onManeuverFighterChosen(i - 1, ids);
+            }, true);
+            setStatus("Choose a fighter to move, or finish movement.");
             break;
         }
 
@@ -1331,12 +1317,20 @@ void GameScreen::enterMode(Mode mode) {
         case Mode::ManeuverSelectDestination: {
             highlightedSpaces_ = controller_.reachableDestinationsFor(selectedFighterId_);
             sf::Font& font = app_.resources().getFont("assets/fonts/title_font.ttf");
-            cancelButton_.emplace(font, "Cancel", sf::Vector2f(kBoardX, kControlRowY), sf::Vector2f(90.f, kControlRowH));
-            cancelButton_->onClick = [this]() { onCancelClicked(); };
-            chipButtons_.emplace_back(font, "Finish Maneuver", sf::Vector2f(kBoardX + 100.f, kControlRowY),
+            int remaining = std::max(0, controller_.remainingMovementForFighter(selectedFighterId_));
+            chipButtons_.emplace_back(font, "Finish this fighter (" + std::to_string(remaining) + ")",
+                                      sf::Vector2f(kBoardX + 60.f, kControlRowY),
+                                      sf::Vector2f(210.f, kControlRowH));
+            chipButtons_.back().onClick = [this]() {
+                controller_.finishCurrentFighter(selectedFighterId_);
+                auto next = controller_.movableCurrentFighterIds();
+                if (next.empty()) onFinishManeuverClicked();
+                else enterMode(Mode::ManeuverSelectFighter);
+            };
+            chipButtons_.emplace_back(font, "Finish Maneuver", sf::Vector2f(kBoardX + 282.f, kControlRowY),
                                       sf::Vector2f(150.f, kControlRowH));
             chipButtons_.back().onClick = [this]() { onFinishManeuverClicked(); };
-            setStatus("Click a glowing destination on the board to move the selected fighter.");
+            setStatus("Click a glowing destination, finish this fighter, or finish the maneuver.");
             break;
         }
 
@@ -1345,7 +1339,7 @@ void GameScreen::enterMode(Mode mode) {
             std::vector<std::string> labels;
             for (auto& id : ids) labels.push_back(fighterLabel(id));
             if (labels.empty()) {
-                setStatus("No fighter available to attack.");
+                setError("No legal attacker has both a target and an attack card.");
                 enterMode(Mode::Idle);
                 return;
             }
@@ -1386,6 +1380,11 @@ void GameScreen::enterMode(Mode mode) {
         case Mode::AttackSelectDefenseCard: {
             auto indexes = controller_.legalDefenseCardsFor(selectedTargetId_);
             const Player* defenderOwner = controller_.ownerOfFighter(selectedTargetId_);
+            if (!defenderOwner) {
+                setError("Could not find defender owner.");
+                enterMode(Mode::Idle);
+                return;
+            }
             const auto& hand = defenderOwner->hand();
             std::vector<std::string> labels;
             for (int idx : indexes) labels.push_back(cardListLabel(hand.at(static_cast<std::size_t>(idx))));
@@ -1398,6 +1397,38 @@ void GameScreen::enterMode(Mode mode) {
             chipButtons_.emplace_back(font, "No Defense", sf::Vector2f(x, skipY), sf::Vector2f(w, h));
             chipButtons_.back().onClick = [this]() { onDefenseCardChosen(-1); };
             setStatus(defenderOwner->name() + ": choose a Defense card, or No Defense.");
+            break;
+        }
+
+        case Mode::AttackBeastBoost: {
+            const auto& hand = controller_.currentPlayer().hand();
+            std::vector<int> indexes;
+            std::vector<std::string> labels;
+            labels.push_back("Done choosing Beastform discards (+" +
+                             std::to_string(selectedBeastFormBoostIndexes_.size()) + " attack)");
+            for (int i = 0; i < static_cast<int>(hand.size()); ++i) {
+                if (i == selectedAttackCardIndex_) continue;
+                if (std::find(selectedBeastFormBoostIndexes_.begin(), selectedBeastFormBoostIndexes_.end(), i) !=
+                    selectedBeastFormBoostIndexes_.end()) continue;
+                indexes.push_back(i);
+                labels.push_back(cardListLabel(hand.at(static_cast<std::size_t>(i))));
+            }
+            rebuildChipButtons(labels, [this, indexes](int i) {
+                if (i == 0) {
+                    onBeastBoostDone();
+                } else {
+                    onBeastBoostChosen(indexes.at(static_cast<std::size_t>(i - 1)));
+                }
+            }, true);
+            setStatus("BEASTFORM: discard any number of other cards for +1 attack each.");
+            break;
+        }
+
+        case Mode::AttackElementaryPrediction: {
+            std::vector<std::string> labels;
+            for (int value = 0; value <= 6; ++value) labels.push_back("Predict " + std::to_string(value));
+            rebuildChipButtons(labels, [this](int i) { onElementaryPredictionChosen(i); });
+            setStatus("ELEMENTARY: predict the attack value.");
             break;
         }
 
@@ -1427,9 +1458,6 @@ void GameScreen::enterMode(Mode mode) {
 
         case Mode::SchemeSelectDestination: {
             highlightedSpaces_ = controller_.destinationChoicesForScheme(pendingSchemeHandIndex_, pendingSchemeChoice_);
-            sf::Font& font = app_.resources().getFont("assets/fonts/title_font.ttf");
-            cancelButton_.emplace(font, "Cancel", sf::Vector2f(kBoardX, kControlRowY), sf::Vector2f(90.f, kControlRowH));
-            cancelButton_->onClick = [this]() { onCancelClicked(); };
             setStatus("Click the scheme's destination space on the board.");
             break;
         }
@@ -1454,11 +1482,23 @@ void GameScreen::enterMode(Mode mode) {
 
         case Mode::SchemeStepLightlyTarget: {
             std::vector<std::string> ids;
-            for (const Fighter* f : controller_.opponentPlayer().aliveFighters()) {
-                ids.push_back(f->id());
+            const Fighter& invisible = controller_.currentPlayer().heroFighter();
+            for (const auto& fighter : controller_.opponentPlayer().fighters()) {
+                if (!fighter->defeated() &&
+                    controller_.board().areAdjacentForCombat(invisible.spaceId(), fighter->spaceId())) {
+                    ids.push_back(fighter->id());
+                }
             }
             if (ids.empty()) {
-                setError("No valid target for Step Lightly.");
+                try {
+                    Card played = controller_.currentPlayer().removeCardFromHand(pendingSchemeHandIndex_);
+                    controller_.currentPlayer().addToDiscard(std::move(played));
+                    controller_.decrementActions();
+                    controller_.endTurnIfNeeded();
+                    setError("No adjacent enemy fighters.");
+                } catch (const std::exception& e) {
+                    setError(e.what());
+                }
                 pendingSchemeHandIndex_ = -1;
                 enterMode(Mode::Idle);
                 return;
@@ -1467,6 +1507,37 @@ void GameScreen::enterMode(Mode mode) {
             for (auto& id : ids) labels.push_back(fighterLabel(id));
             rebuildChipButtons(labels, [this, ids](int i) { onSchemeStepLightlyTargetChosen(i, ids); });
             setStatus("STEP LIGHTLY: choose an enemy fighter to damage.");
+            break;
+        }
+
+        case Mode::RaveningTarget: {
+            auto ids = controller_.getRaveningTargets();
+            std::vector<std::string> labels;
+            labels.push_back("Done moving fighters");
+            for (auto& id : ids) labels.push_back(fighterLabel(id));
+            rebuildChipButtons(labels, [this, ids](int i) {
+                if (i == 0) onRaveningFinish();
+                else onRaveningTargetChosen(i - 1, ids);
+            }, true);
+            setStatus("RAVENING SEDUCTION: choose a fighter to move up to 2 spaces, or finish.");
+            break;
+        }
+
+        case Mode::RaveningDestination: {
+            highlightedSpaces_ = controller_.getRaveningDestinations(selectedRaveningFighterId_);
+            setStatus("RAVENING SEDUCTION: click a destination for " + fighterLabel(selectedRaveningFighterId_) + ".");
+            break;
+        }
+
+        case Mode::RaveningContinue: {
+            sf::Font& font = app_.resources().getFont("assets/fonts/title_font.ttf");
+            chipButtons_.emplace_back(font, "Move another fighter", sf::Vector2f(kBoardX + 100.f, kControlRowY),
+                                      sf::Vector2f(190.f, kControlRowH));
+            chipButtons_.back().onClick = [this]() { onRaveningContinue(); };
+            chipButtons_.emplace_back(font, "Finish Ravening", sf::Vector2f(kBoardX + 305.f, kControlRowY),
+                                      sf::Vector2f(170.f, kControlRowH));
+            chipButtons_.back().onClick = [this]() { onRaveningFinish(); };
+            setStatus("RAVENING SEDUCTION: move another fighter or finish.");
             break;
         }
 
@@ -1480,8 +1551,6 @@ void GameScreen::enterMode(Mode mode) {
             chipButtons_.emplace_back(font, "No, move fog", sf::Vector2f(kBoardX + 260.f, kControlRowY),
                                       sf::Vector2f(150.f, kControlRowH));
             chipButtons_.back().onClick = [this]() { onConfoundNo(); };
-            cancelButton_.emplace(font, "Wait", sf::Vector2f(kBoardX, kControlRowY), sf::Vector2f(90.f, kControlRowH));
-            cancelButton_->onClick = []() {};
             setStatus("CONFOUND: " + askedName + " must choose -- discard a card, or move a fog token.");
             break;
         }
@@ -1541,7 +1610,6 @@ void GameScreen::enterMode(Mode mode) {
             if (codedNotesSelection_.size() == 2) {
                 chipButtons_.back().onClick = [this]() { onCodedNotesConfirm(); };
             }
-            if (cancelButton_) cancelButton_->onClick = [this]() { onCodedNotesCancel(); };
             setStatus("CODED NOTES: pick exactly 2 cards from your hand to put on top of your deck.");
             break;
         }
@@ -1554,8 +1622,11 @@ void GameScreen::enterMode(Mode mode) {
             chipButtons_.emplace_back(font, "Move a Fog token", sf::Vector2f(kBoardX + 290.f, kControlRowY),
                                       sf::Vector2f(220.f, kControlRowH));
             chipButtons_.back().onClick = [this]() { onLurkingChoiceChosen(1); };
-            cancelButton_.emplace(font, "Skip", sf::Vector2f(kBoardX, kControlRowY), sf::Vector2f(90.f, kControlRowH));
-            cancelButton_->onClick = [this]() { onLurkingSkip(); };
+            
+            chipButtons_.emplace_back(font, "Skip", sf::Vector2f(kBoardX + 530.f, kControlRowY), sf::Vector2f(100.f, kControlRowH));
+            chipButtons_.back().onClick = [this]() { onLurkingSkip(); };
+            chipButtons_.back().accent = sf::Color(130, 125, 120);
+
             setStatus("LURKING: teleport Invisible Man to a Fog space, or move a Fog token.");
             break;
         }
@@ -1597,8 +1668,12 @@ void GameScreen::enterMode(Mode mode) {
             }
             sf::Font& font = app_.resources().getFont("assets/fonts/title_font.ttf");
             rebuildChipButtons(labels, [this, tokens](int i) { onSlipAwayFogTokenChosen(tokens[static_cast<std::size_t>(i)]); });
-            cancelButton_.emplace(font, "Skip", sf::Vector2f(kBoardX, kControlRowY), sf::Vector2f(90.f, kControlRowH));
-            cancelButton_->onClick = [this]() { onSlipAwaySkip(); };
+            
+            float xOffset = kBoardX + 100.f + labels.size() * 125.f;
+            chipButtons_.emplace_back(font, "Skip", sf::Vector2f(xOffset, kControlRowY), sf::Vector2f(90.f, kControlRowH));
+            chipButtons_.back().onClick = [this]() { onSlipAwaySkip(); };
+            chipButtons_.back().accent = sf::Color(130, 125, 120);
+
             setStatus("SLIP AWAY: choose a fog token to teleport Invisible Man to.");
             break;
         }
@@ -1620,8 +1695,12 @@ void GameScreen::enterMode(Mode mode) {
             }
             sf::Font& font = app_.resources().getFont("assets/fonts/title_font.ttf");
             rebuildChipButtons(labels, [this, tokens](int i) { onRollingFogFogTokenChosen(tokens[static_cast<std::size_t>(i)]); });
-            cancelButton_.emplace(font, "Skip", sf::Vector2f(kBoardX, kControlRowY), sf::Vector2f(90.f, kControlRowH));
-            cancelButton_->onClick = [this]() { onRollingFogSkip(); };
+            
+            float xOffset = kBoardX + 100.f + labels.size() * 125.f;
+            chipButtons_.emplace_back(font, "Skip", sf::Vector2f(xOffset, kControlRowY), sf::Vector2f(90.f, kControlRowH));
+            chipButtons_.back().onClick = [this]() { onRollingFogSkip(); };
+            chipButtons_.back().accent = sf::Color(130, 125, 120);
+
             setStatus("ROLLING FOG: choose which fog token to move.");
             break;
         }
@@ -1637,19 +1716,29 @@ void GameScreen::enterMode(Mode mode) {
             auto options = controller_.pendingFogChoices();
             std::vector<std::string> labels;
             for (int token : options) labels.push_back("Fog Token " + std::to_string(token + 1));
+
             if (labels.empty()) {
                 setError("No movable fog token is available.");
                 enterMode(Mode::Idle);
                 return;
             }
+
             rebuildChipButtons(labels, [this, options](int i) { onFogTokenChosen(options[static_cast<std::size_t>(i)]); });
-            setStatus("Choose which Fog token to move.");
+
+            const auto& pending = controller_.pendingFogChoice();
+            const std::string& chooserName = controller_.players()[static_cast<std::size_t>(pending.chooserPlayerIndex)].name();
+
+            setStatus(chooserName + ": Choose which Fog token to move.");
             break;
         }
 
         case Mode::FogTokenDestination: {
             highlightedSpaces_ = controller_.getReachableFogDestinations(pendingFogTokenIndex_);
-            setStatus("Click a glowing destination for the selected Fog token.");
+
+            const auto& pending = controller_.pendingFogChoice();
+            const std::string& chooserName = controller_.players()[static_cast<std::size_t>(pending.chooserPlayerIndex)].name();
+
+            setStatus(chooserName + ": Click a glowing destination for the selected Fog token.");
             break;
         }
 
@@ -1710,6 +1799,26 @@ void GameScreen::enterMode(Mode mode) {
             break;
         }
 
+        case Mode::LoadGame: {
+            auto slots = controller_.getSaveSlots();
+            std::vector<std::string> labels;
+            std::vector<int> slotNumbers;
+            for (const auto& slot : slots) {
+                slotNumbers.push_back(slot.first);
+                labels.push_back(slot.second);
+            }
+            if (labels.empty()) {
+                setError("No save files found.");
+                enterMode(Mode::Idle);
+                return;
+            }
+            rebuildChipButtons(labels, [this, slotNumbers](int i) {
+                onLoadSlotChosen(slotNumbers.at(static_cast<std::size_t>(i)));
+            }, true);
+            setStatus("Choose a save slot to load.");
+            break;
+        }
+
         case Mode::GameOver: {
             sf::Font& font = app_.resources().getFont("assets/fonts/title_font.ttf");
             backToMenuButton_.emplace(font, "Back to Menu",
@@ -1720,7 +1829,7 @@ void GameScreen::enterMode(Mode mode) {
         }
     }
     } catch (const std::exception& e) {
-        
+
         mode_ = Mode::Idle;
         clearInteractiveWidgets();
         actionButtons_.clear();
@@ -1735,30 +1844,36 @@ void GameScreen::enterMode(Mode mode) {
     }
 }
 
-
-
 void GameScreen::onManeuverClicked() {
     maneuverBegun_ = false;
     selectedFighterId_.clear();
-    enterMode(Mode::ManeuverSelectFighter);
+    enterMode(Mode::ManeuverSelectBoost);
 }
-void GameScreen::onAttackClicked() { enterMode(Mode::AttackSelectAttacker); }
-void GameScreen::onSchemeClicked() { enterMode(Mode::SchemeSelectCard); }
+void GameScreen::onAttackClicked() {
+    if (controller_.legalAttackers().empty()) {
+        setError("No legal attacker has both a target and an attack card.");
+        return;
+    }
+    enterMode(Mode::AttackSelectAttacker);
+}
+
+void GameScreen::onSchemeClicked() {
+    if (controller_.legalSchemeCards().empty()) {
+        setError("No legal scheme card is available.");
+        return;
+    }
+    enterMode(Mode::SchemeSelectCard);
+}
 void GameScreen::onDiscardClicked() { enterMode(Mode::DiscardSelectCard); }
 void GameScreen::onDraculaAbilityClicked() { enterMode(Mode::DraculaAbilityTarget); }
 
 void GameScreen::onEndTurnClicked() {
-    
+
     if (controller_.actionsRemaining() > 0) {
         controller_.addAction(-controller_.actionsRemaining());
     }
     controller_.endTurnIfNeeded();
     setStatus("Turn ended.");
-    enterMode(Mode::Idle);
-}
-
-void GameScreen::onCancelClicked() {
-    maneuverBegun_ = false;
     enterMode(Mode::Idle);
 }
 
@@ -1796,18 +1911,52 @@ void GameScreen::onBoostCardChosen(int handIndex) {
         return;
     }
     maneuverBegun_ = true;
-    
-    enterMode(Mode::ManeuverSelectDestination);
+
+    enterMode(Mode::ManeuverSelectFighter);
+}
+
+void GameScreen::onLoadClicked() {
+    enterMode(Mode::LoadGame);
+}
+
+void GameScreen::onLoadSlotChosen(int slot) {
+    try {
+        controller_.loadGame(slot);
+        maneuverBegun_ = false;
+        selectedFighterId_.clear();
+        selectedTargetId_.clear();
+        selectedRaveningFighterId_.clear();
+        selectedBeastFormBoostIndexes_.clear();
+        setStatus("Saved game loaded.");
+    } catch (const std::exception& e) {
+        setError(e.what());
+    }
+    enterMode(Mode::Idle);
+}
+
+void GameScreen::onHelpClicked() {
+    infoPopupTitle_ = "HELP";
+    infoPopupMessage_ =
+        "Actions: Maneuver, Attack, Scheme.\n"
+        "Maneuver draws 1 card, then movement may be boosted.\n"
+        "Attack needs a legal attacker, target, and attack card.\n"
+        "Schemes resolve their card effect immediately.\n"
+        "Shortcuts: S Save, L Load, Z Undo.";
+    enterMode(Mode::InfoPopup);
+}
+
+void GameScreen::onMainMenuClicked() {
+    app_.setScreen(std::make_unique<MainMenuScreen>(app_));
 }
 
 void GameScreen::onManeuverFighterChosen(int index, const std::vector<std::string>& ids) {
     if (index < 0 || static_cast<std::size_t>(index) >= ids.size()) return;
     selectedFighterId_ = ids[static_cast<std::size_t>(index)];
     if (!maneuverBegun_) {
-        
+
         enterMode(Mode::ManeuverSelectBoost);
     } else {
-        
+
         enterMode(Mode::ManeuverSelectDestination);
     }
 }
@@ -1821,12 +1970,29 @@ void GameScreen::onDestinationSpaceClicked(int spaceId) {
         return;
     }
 
-    const auto next = controller_.movableCurrentFighterIds();
-    if (next.empty()) {
-        onFinishManeuverClicked();
-    } else {
-        enterMode(Mode::ManeuverSelectFighter);
+    if (controller_.remainingMovementForFighter(selectedFighterId_) > 0) {
+        highlightedSpaces_ = controller_.reachableDestinationsFor(selectedFighterId_);
+        const Fighter* fighter = controller_.findFighterById(selectedFighterId_);
+        bool hasOther = false;
+        if (fighter) {
+            for (int destination : highlightedSpaces_) {
+                if (destination != fighter->spaceId() &&
+                    controller_.getMovementCost(selectedFighterId_, destination) > 0) {
+                    hasOther = true;
+                    break;
+                }
+            }
+        }
+        if (hasOther) {
+            enterMode(Mode::ManeuverSelectDestination);
+            return;
+        }
     }
+
+    controller_.finishCurrentFighter(selectedFighterId_);
+    const auto next = controller_.movableCurrentFighterIds();
+    if (next.empty()) onFinishManeuverClicked();
+    else enterMode(Mode::ManeuverSelectFighter);
 }
 
 void GameScreen::onFinishManeuverClicked() {
@@ -1851,16 +2017,58 @@ void GameScreen::onTargetChosen(int index, const std::vector<std::string>& ids) 
 
 void GameScreen::onAttackCardChosen(int handIndex) {
     selectedAttackCardIndex_ = handIndex;
+    selectedBeastFormBoostIndexes_.clear();
+    const Card& attackCard = controller_.currentPlayer().hand().at(static_cast<std::size_t>(handIndex));
+    if (attackCard.getTitle() == "BEASTFORM") {
+        enterMode(Mode::AttackBeastBoost);
+        return;
+    }
+    enterMode(Mode::AttackSelectDefenseCard);
+}
+
+void GameScreen::onBeastBoostChosen(int handIndex) {
+    if (std::find(selectedBeastFormBoostIndexes_.begin(), selectedBeastFormBoostIndexes_.end(), handIndex) ==
+        selectedBeastFormBoostIndexes_.end()) {
+        selectedBeastFormBoostIndexes_.push_back(handIndex);
+    }
+    enterMode(Mode::AttackBeastBoost);
+}
+
+void GameScreen::onBeastBoostDone() {
     enterMode(Mode::AttackSelectDefenseCard);
 }
 
 void GameScreen::onDefenseCardChosen(int handIndex) {
+    if (handIndex != -1) {
+        const Player* defenderOwner = controller_.ownerOfFighter(selectedTargetId_);
+        if (defenderOwner && defenderOwner->hand().at(static_cast<std::size_t>(handIndex)).getTitle() == "ELEMENTARY") {
+            selectedDefenseCardIndex_ = handIndex;
+            enterMode(Mode::AttackElementaryPrediction);
+            return;
+        }
+    }
     try {
-        controller_.resolveAttack(selectedFighterId_, selectedTargetId_, selectedAttackCardIndex_, handIndex);
+        controller_.resolveAttack(selectedFighterId_, selectedTargetId_, selectedAttackCardIndex_, handIndex,
+                                  selectedBeastFormBoostIndexes_, -1);
         setStatus("Attack resolved.");
     } catch (const std::exception& e) {
         setError(e.what());
     }
+    selectedBeastFormBoostIndexes_.clear();
+    selectedDefenseCardIndex_ = -1;
+    enterMode(Mode::Idle);
+}
+
+void GameScreen::onElementaryPredictionChosen(int value) {
+    try {
+        controller_.resolveAttack(selectedFighterId_, selectedTargetId_, selectedAttackCardIndex_,
+                                  selectedDefenseCardIndex_, selectedBeastFormBoostIndexes_, value);
+        setStatus("Attack resolved.");
+    } catch (const std::exception& e) {
+        setError(e.what());
+    }
+    selectedBeastFormBoostIndexes_.clear();
+    selectedDefenseCardIndex_ = -1;
     enterMode(Mode::Idle);
 }
 
@@ -1879,24 +2087,27 @@ void GameScreen::onSchemeCardChosen(int handIndex) {
     pendingSchemeChoice_ = SchemeChoice{};
 
     const Card& card = controller_.currentPlayer().hand().at(static_cast<std::size_t>(handIndex));
-    
+
     if (card.getTitle() == "CONFIRM SUSPICION") {
         enterMode(Mode::SchemeSelectNamedValue);
         return;
     }
-    
+
     if (card.getTitle() == "RAVENING SEDUCTION") {
         try {
             controller_.playScheme(pendingSchemeHandIndex_, pendingSchemeChoice_);
-            setStatus("Ravening Seduction: All fighters moved.");
+            setStatus("Ravening Seduction: choose fighters to move.");
         } catch (const std::exception& e) {
             setError(e.what());
+            pendingSchemeHandIndex_ = -1;
+            enterMode(Mode::Idle);
+            return;
         }
         pendingSchemeHandIndex_ = -1;
-        enterMode(Mode::Idle);
+        enterMode(Mode::RaveningTarget);
         return;
     }
-   
+
     if (card.getTitle() == "VANISH") {
         try {
             controller_.handleVanish(pendingSchemeHandIndex_);
@@ -1979,29 +2190,12 @@ void GameScreen::onSchemeNamedValueChosen(int index, const std::vector<int>& val
 
     const Card& card = controller_.currentPlayer().hand().at(static_cast<std::size_t>(pendingSchemeHandIndex_));
     if (card.getTitle() == "CONFIRM SUSPICION") {
-      
+
         auto matching = controller_.getMatchingCardIndicesForConfirmSuspicion(value);
         if (matching.empty()) {
-            std::ostringstream oss;
-            oss << "No card matches value " << value << ". Opponent hand: ";
-            const auto& hand = controller_.opponentPlayer().hand();
-            if (hand.empty()) {
-                oss << "(empty)";
-            } else {
-                for (std::size_t i = 0; i < hand.size(); ++i) {
-                    oss << hand[i].getTitle();
-                    if (i + 1 < hand.size()) oss << ", ";
-                }
-            }
-            infoPopupTitle_ = "CONFIRM SUSPICION";
-            infoPopupMessage_ = oss.str();
-            Player& current = controller_.currentPlayer();
-            Card played = current.removeCardFromHand(pendingSchemeHandIndex_);
-            current.addToDiscard(std::move(played));
-            controller_.decrementActions();
-            controller_.endTurnIfNeeded();
+            controller_.playConfirmSuspicion(pendingSchemeHandIndex_, value);
             pendingSchemeHandIndex_ = -1;
-            enterMode(Mode::InfoPopup);
+            enterMode(Mode::Idle);
             return;
         }
         std::vector<std::string> labels;
@@ -2038,6 +2232,43 @@ void GameScreen::finalizeSchemeIfReady() {
     }
     pendingSchemeHandIndex_ = -1;
     pendingSchemeKind_ = SchemeChoiceKind::None;
+    enterMode(Mode::Idle);
+}
+
+void GameScreen::onRaveningTargetChosen(int index, const std::vector<std::string>& ids) {
+    if (index < 0 || static_cast<std::size_t>(index) >= ids.size()) return;
+    selectedRaveningFighterId_ = ids[static_cast<std::size_t>(index)];
+    enterMode(Mode::RaveningDestination);
+}
+
+void GameScreen::onRaveningDestinationClicked(int spaceId) {
+    try {
+        controller_.applyRaveningMove(selectedRaveningFighterId_, spaceId);
+        setStatus("Ravening move selected.");
+    } catch (const std::exception& e) {
+        setError(e.what());
+        return;
+    }
+    enterMode(Mode::RaveningContinue);
+}
+
+void GameScreen::onRaveningContinue() {
+    if (controller_.getRaveningTargets().empty()) {
+        onRaveningFinish();
+    } else {
+        enterMode(Mode::RaveningTarget);
+    }
+}
+
+void GameScreen::onRaveningFinish() {
+    try {
+        controller_.finishRaveningScheme();
+        setStatus("Ravening Seduction resolved.");
+    } catch (const std::exception& e) {
+        setError(e.what());
+        return;
+    }
+    selectedRaveningFighterId_.clear();
     enterMode(Mode::Idle);
 }
 
@@ -2108,12 +2339,6 @@ void GameScreen::onCodedNotesConfirm() {
     } catch (const std::exception& e) {
         setError(e.what());
     }
-    codedNotesSelection_.clear();
-    enterMode(Mode::Idle);
-}
-
-void GameScreen::onCodedNotesCancel() {
-    controller_.cancelCodedNotes();
     codedNotesSelection_.clear();
     enterMode(Mode::Idle);
 }
@@ -2272,7 +2497,7 @@ std::optional<std::string> GameScreen::fighterIdAtPoint(sf::Vector2f point) cons
     float bestDistanceSq = hitRadius * hitRadius;
     std::optional<std::string> result;
 
-   
+
     for (const auto& player : controller_.players()) {
         for (const auto& fighterPtr : player.fighters()) {
             const Fighter& fighter = *fighterPtr;
@@ -2303,7 +2528,7 @@ bool GameScreen::handleBoardClick(sf::Vector2f point) {
     if (mode_ == Mode::ManeuverSelectFighter) {
         auto id = fighterIdAtPoint(point);
         if (id && isSelectableFighter(*id)) {
-           
+
             const auto it = std::find(selectableFighterIds_.begin(),
                                       selectableFighterIds_.end(), *id);
             if (it != selectableFighterIds_.end()) {
@@ -2335,6 +2560,7 @@ bool GameScreen::handleBoardClick(sf::Vector2f point) {
                     case Mode::LurkingDestination: onLurkingDestinationClicked(spaceId); return true;
                     case Mode::SlipAwayDestination: onSlipAwayDestinationClicked(spaceId); return true;
                     case Mode::RollingFogDestination: onRollingFogDestinationClicked(spaceId); return true;
+                    case Mode::RaveningDestination: onRaveningDestinationClicked(spaceId); return true;
                     default: break;
                 }
             }

@@ -106,9 +106,19 @@ void FighterSelectScreen::centerSubtitle() {
     subtitle_.setPosition(sf::Vector2f(app_.window().getSize().x / 2.f, 105.f));
 }
 void FighterSelectScreen::updateStatus() {
-    if (selectionPhase_ == 0) statusMessage_ = "PLAYER " + std::to_string((playerOneAge_ <= playerTwoAge_) ? 1 : 2) + " (YOUNGER) SELECTS FIRST";
-    else if (selectionPhase_ == 1) statusMessage_ = "PLAYER 2 SELECTS THEIR FIGHTER";
-    else statusMessage_ = "FIGHTERS SELECTED! PRESS CONFIRM TO CONTINUE";
+    if (selectionPhase_ == 0) {
+        int firstPlayer = (playerOneAge_ <= playerTwoAge_) ? 1 : 2;
+        title_.setString("PLAYER " + std::to_string(firstPlayer) + ", CHOOSE YOUR LEGEND");
+        statusMessage_ = "PLAYER " + std::to_string(firstPlayer) + " (YOUNGER) SELECTS FIRST";
+    } else if (selectionPhase_ == 1) {
+        int secondPlayer = (playerOneAge_ <= playerTwoAge_) ? 2 : 1;
+        title_.setString("PLAYER " + std::to_string(secondPlayer) + ", CHOOSE YOUR LEGEND");
+        statusMessage_ = "PLAYER " + std::to_string(secondPlayer) + " SELECTS THEIR FIGHTER";
+    } else {
+        title_.setString("FIGHTERS SELECTED");
+        statusMessage_ = "FIGHTERS SELECTED! PRESS CONFIRM TO CONTINUE";
+    }
+    centerTitle();
 }
 void FighterSelectScreen::onFighterSelected(int index) {
     if (selectionPhase_ == 0) {

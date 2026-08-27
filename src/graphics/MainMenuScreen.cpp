@@ -12,7 +12,8 @@ MainMenuScreen::MainMenuScreen(Application& app)
     , title_(app_.resources().getFont("assets/fonts/title_font.ttf"))
     , subtitle_(app_.resources().getFont("assets/fonts/title_font.ttf"))
     , statusText_(app_.resources().getFont("assets/fonts/title_font.ttf"))
-    , loadMenuTitle_(app_.resources().getFont("assets/fonts/title_font.ttf")) {
+    , loadMenuTitle_(app_.resources().getFont("assets/fonts/title_font.ttf"))
+    , helpText_(app_.resources().getFont("assets/fonts/title_font.ttf")) {
 
     fitBackgroundToWindow();
 
@@ -44,8 +45,13 @@ MainMenuScreen::MainMenuScreen(Application& app)
         sf::Vector2f(buttonWidth, buttonHeight));
     buttons_.back().onClick = [this]() { onLoadGame(); };
 
-    buttons_.emplace_back(buttonFont, "Exit",
+    buttons_.emplace_back(buttonFont, "Help",
         sf::Vector2f((windowSize.x - buttonWidth) / 2.f, startY + 2 * (buttonHeight + gap)),
+        sf::Vector2f(buttonWidth, buttonHeight));
+    buttons_.back().onClick = [this]() { onHelp(); };
+
+    buttons_.emplace_back(buttonFont, "Exit",
+        sf::Vector2f((windowSize.x - buttonWidth) / 2.f, startY + 3 * (buttonHeight + gap)),
         sf::Vector2f(buttonWidth, buttonHeight));
     buttons_.back().onClick = [this]() { onExit(); };
 
@@ -57,9 +63,27 @@ MainMenuScreen::MainMenuScreen(Application& app)
     loadMenuTitle_.setCharacterSize(30);
     loadMenuTitle_.setFillColor(sf::Color(220, 200, 150));
     loadMenuTitle_.setStyle(sf::Text::Bold);
+
+    helpText_.setCharacterSize(18);
+    helpText_.setFillColor(sf::Color(230, 220, 200));
+    helpText_.setString(
+        "How to play\n\n"
+        "Each turn has 2 actions: Maneuver, Attack, or Scheme.\n"
+        "Maneuver draws 1 card, then lets you move fighters.\n"
+        "Attack: choose attacker, target, attack card, then defense.\n"
+        "Scheme: play a scheme card and resolve its effect.\n"
+        "Shortcuts in game: S Save, L Load, Z Undo."
+    );
+    helpText_.setPosition(sf::Vector2f(330.f, 245.f));
 }
 
 void MainMenuScreen::handleEvent(const sf::Event& event) {
+    if (showingHelp_) {
+        if (loadBackButton_) {
+            loadBackButton_->handleEvent(event, app_.window());
+        }
+        return;
+    }
     if (showingLoadMenu_) {
         for (auto& button : loadSlotButtons_) {
             button.handleEvent(event, app_.window());
@@ -79,6 +103,14 @@ void MainMenuScreen::update(float /*deltaSeconds*/) {}
 void MainMenuScreen::render(sf::RenderWindow& window) {
     window.draw(background_);
     window.draw(title_);
+
+    if (showingHelp_) {
+        window.draw(helpText_);
+        if (loadBackButton_) {
+            loadBackButton_->render(window);
+        }
+        return;
+    }
 
     if (showingLoadMenu_) {
         window.draw(loadMenuTitle_);
@@ -140,6 +172,18 @@ void MainMenuScreen::onLoadGame() {
     refreshLoadMenu();
 }
 
+void MainMenuScreen::onHelp() {
+    sf::Vector2f windowSize(static_cast<sf::Vector2f>(app_.window().getSize()));
+    sf::Font& font = app_.resources().getFont("assets/fonts/title_font.ttf");
+    loadBackButton_ = std::make_unique<Button>(
+        font, "Back",
+        sf::Vector2f(50.f, windowSize.y - 100.f),
+        sf::Vector2f(120.f, 50.f));
+    loadBackButton_->onClick = [this]() { onLoadBack(); };
+    showingHelp_ = true;
+    showingLoadMenu_ = false;
+}
+
 void MainMenuScreen::refreshLoadMenu() {
     
     unmatched::GameController tmp;
@@ -184,6 +228,7 @@ void MainMenuScreen::onSlotChosen(int slot) {
 
 void MainMenuScreen::onLoadBack() {
     showingLoadMenu_ = false;
+    showingHelp_ = false;
     loadSlotButtons_.clear();
     loadBackButton_.reset();
     statusMessage_.clear();

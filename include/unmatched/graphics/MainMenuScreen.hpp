@@ -25,6 +25,7 @@ private:
     void centerSubtitle();
     void onStartGame();
     void onLoadGame();
+    void onHelp();
     void onExit();
     void refreshLoadMenu();
     void onSlotChosen(int slot);
@@ -38,9 +39,11 @@ private:
     std::string statusMessage_;
 
     bool showingLoadMenu_ = false;
+    bool showingHelp_ = false;
     std::vector<Button> loadSlotButtons_;
     std::unique_ptr<Button> loadBackButton_;
     sf::Text loadMenuTitle_;
+    sf::Text helpText_;
 };
 
 } // namespace unmatched::gfx

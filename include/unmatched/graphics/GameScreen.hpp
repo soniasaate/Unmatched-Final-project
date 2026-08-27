@@ -36,14 +36,19 @@ private:
         ManeuverSelectDestination,
         AttackSelectAttacker,
         AttackSelectCard,
+        AttackBeastBoost,
         AttackSelectTarget,
         AttackSelectDefenseCard,
+        AttackElementaryPrediction,
         SchemeSelectCard,
         SchemeSelectTarget,
         SchemeSelectDestination,
         SchemeSelectNamedValue,
         SchemeSelectOpponentCard,
         SchemeStepLightlyTarget,
+        RaveningTarget,
+        RaveningDestination,
+        RaveningContinue,
         ConfoundYesNo,
         ConfoundDiscardCard,
         ConfoundFogSelect,
@@ -63,6 +68,7 @@ private:
         DraculaAbilityTarget,
         DiscardSelectCard,
         OptionalMovementDestination,
+        LoadGame,
         GameOver,
     };
 
@@ -123,9 +129,12 @@ private:
     void onDiscardClicked();
     void onEndTurnClicked();
     void onDraculaAbilityClicked();
-    void onCancelClicked();
     void onUndoClicked();
     void onSaveClicked();
+    void onLoadClicked();
+    void onLoadSlotChosen(int slot);
+    void onHelpClicked();
+    void onMainMenuClicked();
 
     void onBoostCardChosen(int handIndex);
     void onManeuverFighterChosen(int index, const std::vector<std::string>& ids);
@@ -134,8 +143,11 @@ private:
 
     void onAttackerChosen(int index, const std::vector<std::string>& ids);
     void onAttackCardChosen(int handIndex);
+    void onBeastBoostChosen(int handIndex);
+    void onBeastBoostDone();
     void onTargetChosen(int index, const std::vector<std::string>& ids);
     void onDefenseCardChosen(int handIndex);
+    void onElementaryPredictionChosen(int value);
     void onDraculaAbilityTargetChosen(int index, const std::vector<std::string>& ids);
 
     void onSchemeCardChosen(int handIndex);
@@ -144,6 +156,10 @@ private:
     void onSchemeOpponentCardChosen(int index, const std::vector<int>& indexes);
     void onSchemeStepLightlyTargetChosen(int index, const std::vector<std::string>& ids);
     void finalizeSchemeIfReady();
+    void onRaveningTargetChosen(int index, const std::vector<std::string>& ids);
+    void onRaveningDestinationClicked(int spaceId);
+    void onRaveningContinue();
+    void onRaveningFinish();
 
     void onConfoundYes();
     void onConfoundNo();
@@ -153,7 +169,6 @@ private:
 
     void onCodedNotesToggleCard(int handIndex);
     void onCodedNotesConfirm();
-    void onCodedNotesCancel();
 
     void onLurkingChoiceChosen(int choice);
     void onLurkingFogTokenChosen(int fogIndex);
@@ -215,7 +230,6 @@ private:
     std::vector<UiButton> actionButtons_;
     std::vector<UiButton> chipButtons_;
     bool chipListVertical_ = false;
-    std::optional<UiButton> cancelButton_;
     std::optional<UiButton> backToMenuButton_;
     std::optional<UiButton> infoOkButton_;
 
@@ -243,7 +257,10 @@ private:
     
     bool maneuverBegun_ = false;
     int selectedAttackCardIndex_ = -1;
+    int selectedDefenseCardIndex_ = -1;
     std::string selectedTargetId_;
+    std::string selectedRaveningFighterId_;
+    std::vector<int> selectedBeastFormBoostIndexes_;
     int pendingSchemeHandIndex_ = -1;
     SchemeChoice pendingSchemeChoice_;
     SchemeChoiceKind pendingSchemeKind_ = SchemeChoiceKind::None;

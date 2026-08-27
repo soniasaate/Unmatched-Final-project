@@ -49,7 +49,8 @@ GameController::GameController()
       random_(std::random_device{}()),
       pendingMovementPoints_(0),
       maxMovementPoints_(0),
-      pendingVanishedPlacement_(false) {}
+      pendingVanishedPlacement_(false),
+      pendingVanishedPlayerIndex_(-1) {}
 
 void GameController::resetState() {
     players_.clear();
@@ -75,6 +76,7 @@ void GameController::resetState() {
     pendingMovementPoints_ = 0;
     maxMovementPoints_ = 0;
     pendingVanishedPlacement_ = false;
+    pendingVanishedPlayerIndex_ = -1;
     vanishedDestination_ = -1;
     studyMethodsHandInfo_.clear();
     confoundSchemeCardIndex_ = -1;
@@ -506,10 +508,14 @@ void GameController::resolveAttack(const std::string& attackerId,
             defenseValue += std::max(0, attackCard.getBoost());
         }
 
-        if (defenseCard.has_value() && !defenseEffectsCanceled) {
+        auto appliesBeforeDamage = [](const Card& card) {
+            return card.getTiming() == Timing::Immediately || card.getTiming() == Timing::DuringCombat;
+        };
+
+        if (defenseCard.has_value() && !defenseEffectsCanceled && appliesBeforeDamage(*defenseCard)) {
             defenseCard->applyEffect(defender, attacker, *this, defenseValue, attackValue);
         }
-        if (!attackEffectsCanceled) {
+        if (!attackEffectsCanceled && appliesBeforeDamage(attackCard)) {
             attackCard.applyEffect(attacker, defender, *this, attackValue, defenseValue);
         }
 
@@ -1098,7 +1104,7 @@ void GameController::advanceTurn() {
 
     clearUndoStack();
 
-    if (pendingVanishedPlacement_) {
+    if (pendingVanishedPlacement_ && pendingVanishedPlayerIndex_ == currentPlayerIndex_) {
         Player& current = currentPlayer();
         if (dynamic_cast<InvisibleMan*>(&current.heroFighter()) != nullptr) {
             pushUndoState();
@@ -1338,6 +1344,7 @@ void GameController::resolveCombatEffectAfterDamage(const Card& card,
         if (dynamic_cast<InvisibleMan*>(&cardPlayer.heroFighter())) {
             PendingConfoundChoice choice;
             choice.playerIndex = opposingPlayer.id();
+            choice.invisiblePlayerIndex = cardPlayer.id();
             choice.opponentDecided = false;
             pendingConfoundChoice_ = choice;
         }
@@ -1380,6 +1387,35 @@ void GameController::resolveCombatEffectAfterDamage(const Card& card,
             choice.step = 0;
             pendingSlipAwayChoice_ = choice;
         }
+        return;
+    }
+    if (title == "COVERT PREPARATION") {
+        drawCard(cardPlayer);
+        auto* invisible = dynamic_cast<InvisibleMan*>(&cardFighter);
+        if (!invisible) return;
+        for (int token : invisible->getFogTokens()) {
+            if (token != -1) {
+                queueFogChoice(cardPlayer.id(), invisible->id(), 2, -1, "COVERT_PREPARATION_PLAYER");
+                break;
+            }
+        }
+        return;
+    }
+    if (title == "DREAMING OF REVENGE") {
+        auto* invisible = dynamic_cast<InvisibleMan*>(&cardPlayer.heroFighter());
+        if (!invisible || !invisible->isOnFog(invisible->spaceId())) return;
+        for (auto& fighter : opposingPlayer.fighters()) {
+            if (!fighter->defeated() && invisible->isOnFog(fighter->spaceId())) {
+                fighter->damage(1);
+            }
+        }
+        return;
+    }
+    if (title == "INTO THIN AIR") {
+        auto* invisible = dynamic_cast<InvisibleMan*>(&cardFighter);
+        if (!invisible) return;
+        queueOptionalMovement(cardPlayer.id(), cardFighter.id(), 1, "INTO THIN AIR");
+        queueFogChoice(cardPlayer.id(), invisible->id(), 3, -1, "INTO THIN AIR");
         return;
     }
 }
@@ -1547,7 +1583,10 @@ void GameController::resolveConfoundFogMove(int fogIndex, int destinationSpace) 
         throw RuleViolation("Invalid destination for confound fog move.");
     }
 
-    auto* invisible = dynamic_cast<InvisibleMan*>(&currentPlayer().heroFighter());
+    int invisiblePlayerIndex = pendingConfoundChoice_->invisiblePlayerIndex == -1
+        ? currentPlayerIndex_
+        : pendingConfoundChoice_->invisiblePlayerIndex;
+    auto* invisible = dynamic_cast<InvisibleMan*>(&playerByIndex(invisiblePlayerIndex).heroFighter());
     if (!invisible) throw RuleViolation("Current player is not Invisible Man.");
     if (fogIndex < 0 || fogIndex >= 3 || invisible->getFogTokens()[fogIndex] == -1) {
         throw RuleViolation("Invalid fog token.");
@@ -1563,7 +1602,10 @@ void GameController::resolveConfoundFogMove(int fogIndex, int destinationSpace) 
 std::vector<int> GameController::getValidConfoundDestinations(int fogIndex) const {
     if (!pendingConfoundChoice_.has_value()) return {};
 
-    const auto* invisible = dynamic_cast<const InvisibleMan*>(&currentPlayer().heroFighter());
+    int invisiblePlayerIndex = pendingConfoundChoice_->invisiblePlayerIndex == -1
+        ? currentPlayerIndex_
+        : pendingConfoundChoice_->invisiblePlayerIndex;
+    const auto* invisible = dynamic_cast<const InvisibleMan*>(&playerByIndex(invisiblePlayerIndex).heroFighter());
     if (!invisible) return {};
 
     const auto& tokens = invisible->getFogTokens();
@@ -1678,6 +1720,7 @@ void GameController::handleVanish(int handIndex) {
         hero.heal(1);
         hero.removeFromBoard();
         pendingVanishedPlacement_ = true;
+        pendingVanishedPlayerIndex_ = currentPlayerIndex_;
         currentPlayer().addToDiscard(std::move(card));
 
         actionsRemaining_ = 0;
@@ -1707,7 +1750,7 @@ void GameController::beginRollingFog(int handIndex) {
 }
 
 void GameController::placeVanishedInvisibleMan(int spaceId) {
-    if (!pendingVanishedPlacement_) {
+    if (!hasPendingVanishedPlacement()) {
         throw RuleViolation("Invisible Man is not waiting to be placed.");
     }
     if (!board_.contains(spaceId)) {
@@ -1722,6 +1765,7 @@ void GameController::placeVanishedInvisibleMan(int spaceId) {
         Fighter& invisible = player.heroFighter();
         invisible.placeAt(spaceId);
         pendingVanishedPlacement_ = false;
+        pendingVanishedPlayerIndex_ = -1;
         vanishedDestination_ = -1;
 
         actionsRemaining_ = 2;
@@ -1879,6 +1923,7 @@ json GameController::createFullSnapshot() const {
     j["maxMovementPoints"] = maxMovementPoints_;
 
     j["pendingVanishedPlacement"] = pendingVanishedPlacement_;
+    j["pendingVanishedPlayerIndex"] = pendingVanishedPlayerIndex_;
     j["vanishedDestination"] = vanishedDestination_;
     j["studyMethodsHandInfo"] = studyMethodsHandInfo_;
     j["confoundSchemeCardIndex"] = confoundSchemeCardIndex_;
@@ -1936,6 +1981,7 @@ json GameController::createFullSnapshot() const {
     if (pendingConfoundChoice_.has_value()) {
         json pc;
         pc["playerIndex"] = pendingConfoundChoice_->playerIndex;
+        pc["invisiblePlayerIndex"] = pendingConfoundChoice_->invisiblePlayerIndex;
         pc["opponentDecided"] = pendingConfoundChoice_->opponentDecided;
         pc["opponentWantsToDiscard"] = pendingConfoundChoice_->opponentWantsToDiscard;
         j["pendingConfoundChoice"] = pc;
@@ -2030,6 +2076,7 @@ void GameController::restoreFullSnapshot(const json& j) {
     maxMovementPoints_ = j.value("maxMovementPoints", 0);
 
     pendingVanishedPlacement_ = j.value("pendingVanishedPlacement", false);
+    pendingVanishedPlayerIndex_ = j.value("pendingVanishedPlayerIndex", -1);
     vanishedDestination_ = j.value("vanishedDestination", -1);
     studyMethodsHandInfo_ = j.value("studyMethodsHandInfo", "");
     confoundSchemeCardIndex_ = j.value("confoundSchemeCardIndex", -1);
@@ -2086,6 +2133,7 @@ void GameController::restoreFullSnapshot(const json& j) {
         const auto& pc = j["pendingConfoundChoice"];
         PendingConfoundChoice choice;
         choice.playerIndex = pc["playerIndex"].get<int>();
+        choice.invisiblePlayerIndex = pc.value("invisiblePlayerIndex", -1);
         choice.opponentDecided = pc["opponentDecided"].get<bool>();
         choice.opponentWantsToDiscard = pc["opponentWantsToDiscard"].get<bool>();
         pendingConfoundChoice_ = choice;
@@ -2162,6 +2210,22 @@ void GameController::restoreFullSnapshot(const json& j) {
                     break;
                 }
             }
+        }
+    }
+
+    if (pendingVanishedPlacement_ && pendingVanishedPlayerIndex_ < 0) {
+        for (const auto& player : players_) {
+            const Fighter& hero = player.heroFighter();
+            if (dynamic_cast<const InvisibleMan*>(&hero) != nullptr && hero.spaceId() == -1) {
+                pendingVanishedPlayerIndex_ = player.id();
+                break;
+            }
+        }
+        if (pendingVanishedPlayerIndex_ < 0 &&
+            currentPlayerIndex_ >= 0 &&
+            currentPlayerIndex_ < static_cast<int>(players_.size()) &&
+            dynamic_cast<const InvisibleMan*>(&currentPlayer().heroFighter()) != nullptr) {
+            pendingVanishedPlayerIndex_ = currentPlayerIndex_;
         }
     }
 }
@@ -2298,7 +2362,7 @@ const PendingLurkingChoice& GameController::pendingLurking() const {
 
 std::vector<int> GameController::getLurkingFogPositions() const {
     if (!pendingLurkingChoice_.has_value() || pendingLurkingChoice_->choice != 0) return {};
-    const Fighter& hero = currentPlayer().heroFighter();
+    const Fighter& hero = playerByIndex(pendingLurkingChoice_->playerIndex).heroFighter();
     const auto* invisible = dynamic_cast<const InvisibleMan*>(&hero);
     if (!invisible) return {};
 
@@ -2313,7 +2377,7 @@ std::vector<int> GameController::getLurkingFogPositions() const {
 
 std::vector<int> GameController::getLurkingFogTokens() const {
     if (!pendingLurkingChoice_.has_value() || pendingLurkingChoice_->choice != 1) return {};
-    const Fighter& hero = currentPlayer().heroFighter();
+    const Fighter& hero = playerByIndex(pendingLurkingChoice_->playerIndex).heroFighter();
     const auto* invisible = dynamic_cast<const InvisibleMan*>(&hero);
     if (!invisible) return {};
 
@@ -2328,7 +2392,7 @@ std::vector<int> GameController::getLurkingFogTokens() const {
 
 std::vector<int> GameController::getLurkingDestinations(int fogIndex) const {
     if (!pendingLurkingChoice_.has_value() || pendingLurkingChoice_->choice != 1) return {};
-    const Fighter& hero = currentPlayer().heroFighter();
+    const Fighter& hero = playerByIndex(pendingLurkingChoice_->playerIndex).heroFighter();
     const auto* invisible = dynamic_cast<const InvisibleMan*>(&hero);
     if (!invisible) return {};
     const auto& tokens = invisible->getFogTokens();
@@ -2367,7 +2431,7 @@ void GameController::resolveLurkingDestination(int destinationSpace) {
         throw RuleViolation("No pending lurking choice.");
     }
 
-    Player& player = currentPlayer();
+    Player& player = playerByIndex(pendingLurkingChoice_->playerIndex);
     Fighter& hero = player.heroFighter();
     auto* invisible = dynamic_cast<InvisibleMan*>(&hero);
     if (!invisible) throw RuleViolation("Current player is not Invisible Man.");
@@ -2411,7 +2475,7 @@ const PendingSlipAwayChoice& GameController::pendingSlipAway() const {
 
 std::vector<int> GameController::getSlipAwayFogTokens() const {
     if (!pendingSlipAwayChoice_.has_value()) return {};
-    const auto* invisible = dynamic_cast<const InvisibleMan*>(&currentPlayer().heroFighter());
+    const auto* invisible = dynamic_cast<const InvisibleMan*>(&playerByIndex(pendingSlipAwayChoice_->playerIndex).heroFighter());
     if (!invisible) return {};
     std::vector<int> res;
     for (int i = 0; i < 3; ++i) {
@@ -2422,7 +2486,7 @@ std::vector<int> GameController::getSlipAwayFogTokens() const {
 
 std::vector<int> GameController::getSlipAwayDestinations() const {
     if (!pendingSlipAwayChoice_.has_value()) return {};
-    const auto* invisible = dynamic_cast<const InvisibleMan*>(&currentPlayer().heroFighter());
+    const auto* invisible = dynamic_cast<const InvisibleMan*>(&playerByIndex(pendingSlipAwayChoice_->playerIndex).heroFighter());
     if (!invisible) return {};
     std::vector<int> res;
     for (const auto& space : board_.spaces()) {
@@ -2448,7 +2512,7 @@ void GameController::resolveSlipAwayDestination(int destinationSpace) {
     if (std::find(dests.begin(), dests.end(), destinationSpace) == dests.end()) {
         throw RuleViolation("Invalid destination space for Slip Away.");
     }
-    auto* invisible = dynamic_cast<InvisibleMan*>(&currentPlayer().heroFighter());
+    auto* invisible = dynamic_cast<InvisibleMan*>(&playerByIndex(pendingSlipAwayChoice_->playerIndex).heroFighter());
     if (!invisible) throw RuleViolation("Hero is not Invisible Man.");
 
     invisible->moveFogToken(pendingSlipAwayChoice_->selectedFogIndex, destinationSpace);

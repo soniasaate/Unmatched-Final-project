@@ -68,7 +68,7 @@ void AgeSetupScreen::render(sf::RenderWindow& window) {
         statusText_.setString(errorMessage_);
         statusText_.setFillColor(sf::Color::Red);
     } else {
-        statusText_.setString("Enter age for Player " + std::to_string(playerIndex_ + 1) + " (1-999)");
+        statusText_.setString("Enter age for Player " + std::to_string(playerIndex_ + 1) + " (8-70)");
         statusText_.setFillColor(sf::Color(210, 190, 100));
     }
     window.draw(statusText_);
@@ -92,7 +92,7 @@ void AgeSetupScreen::updateAgeText() {
 void AgeSetupScreen::onOK() {
     if (ageInput_.empty()) { errorMessage_ = "Please enter an age."; return; }
     int age = std::stoi(ageInput_);
-    if (age <= 0) { errorMessage_ = "Age must be positive."; return; }
+    if (age < 8 || age > 70) { errorMessage_ = "Age must be between 8 and 70."; return; }
     if (playerIndex_ == 0) {
         playerOneAge_ = age; playerIndex_ = 1; ageInput_ = "";
         updateAgeText(); errorMessage_ = "";
