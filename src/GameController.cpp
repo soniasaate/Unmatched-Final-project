@@ -86,7 +86,8 @@ void GameController::resetState() {
 void GameController::startNewGame(int playerOneAge, int playerTwoAge,
                                   std::unique_ptr<Fighter> hero1,
                                   std::unique_ptr<Fighter> hero2,
-                                  int youngerStartSlot) {
+                                  int youngerStartSlot,
+                                  int forcedYoungerPlayerIndex) {
     if (playerOneAge <= 0 || playerTwoAge <= 0) {
         throw InvalidSetup("Ages must be positive numbers.");
     }
@@ -97,7 +98,9 @@ void GameController::startNewGame(int playerOneAge, int playerTwoAge,
     resetState();
 
     int youngerIndex;
-    if (playerOneAge == playerTwoAge) {
+    if (forcedYoungerPlayerIndex == 0 || forcedYoungerPlayerIndex == 1) {
+        youngerIndex = forcedYoungerPlayerIndex;
+    } else if (playerOneAge == playerTwoAge) {
         std::uniform_int_distribution<int> dist(0, 1);
         youngerIndex = dist(random_);
     } else {
@@ -1984,6 +1987,7 @@ json GameController::createFullSnapshot() const {
         pc["invisiblePlayerIndex"] = pendingConfoundChoice_->invisiblePlayerIndex;
         pc["opponentDecided"] = pendingConfoundChoice_->opponentDecided;
         pc["opponentWantsToDiscard"] = pendingConfoundChoice_->opponentWantsToDiscard;
+        pc["fogMoveDone"] = pendingConfoundChoice_->fogMoveDone;
         j["pendingConfoundChoice"] = pc;
     }
 
@@ -2136,6 +2140,7 @@ void GameController::restoreFullSnapshot(const json& j) {
         choice.invisiblePlayerIndex = pc.value("invisiblePlayerIndex", -1);
         choice.opponentDecided = pc["opponentDecided"].get<bool>();
         choice.opponentWantsToDiscard = pc["opponentWantsToDiscard"].get<bool>();
+        choice.fogMoveDone = pc.value("fogMoveDone", false);
         pendingConfoundChoice_ = choice;
     }
 

@@ -10,6 +10,7 @@ namespace unmatched::gfx {
 class FighterSelectScreen : public Screen {
 public:
     FighterSelectScreen(Application& app, int playerOneAge, int playerTwoAge);
+    FighterSelectScreen(Application& app, int playerOneAge, int playerTwoAge, int firstPlayerIndex);
     void handleEvent(const sf::Event& event) override;
     void update(float deltaSeconds) override;
     void render(sf::RenderWindow& window) override;
@@ -34,6 +35,7 @@ private:
     std::vector<Button> buttons_;
     int playerOneAge_;
     int playerTwoAge_;
+    int firstPlayerIndex_;
     int selectionPhase_;
     int selectedFighter1_;
     int selectedFighter2_;

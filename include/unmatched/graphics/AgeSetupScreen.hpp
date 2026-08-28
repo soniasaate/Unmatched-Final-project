@@ -29,5 +29,6 @@ private:
     std::string errorMessage_;
     int playerOneAge_;
     int playerTwoAge_;
+    int firstPlayerIndex_;
 };
 }

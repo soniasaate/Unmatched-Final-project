@@ -64,17 +64,28 @@ MainMenuScreen::MainMenuScreen(Application& app)
     loadMenuTitle_.setFillColor(sf::Color(220, 200, 150));
     loadMenuTitle_.setStyle(sf::Text::Bold);
 
-    helpText_.setCharacterSize(18);
+    helpText_.setCharacterSize(19);
     helpText_.setFillColor(sf::Color(230, 220, 200));
     helpText_.setString(
-        "How to play\n\n"
-        "Each turn has 2 actions: Maneuver, Attack, or Scheme.\n"
-        "Maneuver draws 1 card, then lets you move fighters.\n"
-        "Attack: choose attacker, target, attack card, then defense.\n"
-        "Scheme: play a scheme card and resolve its effect.\n"
-        "Shortcuts in game: S Save, L Load, Z Undo."
+        "HOW TO PLAY\n\n"
+        "TURN\n"
+        "  Each player gets 2 actions.\n"
+        "  Choose Maneuver, Attack, or Scheme.\n\n"
+        "MANEUVER\n"
+        "  Draw 1 card.\n"
+        "  Optionally boost movement.\n"
+        "  Move one or more fighters.\n\n"
+        "ATTACK\n"
+        "  Pick attacker and target.\n"
+        "  Choose an attack card.\n"
+        "  Defender may choose a defense card.\n\n"
+        "SCHEME\n"
+        "  Play a scheme card.\n"
+        "  Follow the prompts until the effect resolves.\n\n"
+        "SHORTCUTS\n"
+        "  S  Save        L  Load        Z  Undo"
     );
-    helpText_.setPosition(sf::Vector2f(330.f, 245.f));
+    helpText_.setPosition(sf::Vector2f(355.f, 220.f));
 }
 
 void MainMenuScreen::handleEvent(const sf::Event& event) {
@@ -105,6 +116,12 @@ void MainMenuScreen::render(sf::RenderWindow& window) {
     window.draw(title_);
 
     if (showingHelp_) {
+        sf::RectangleShape panel(sf::Vector2f(640.f, 600.f));
+        panel.setPosition(sf::Vector2f(320.f, 195.f));
+        panel.setFillColor(sf::Color(18, 16, 14, 220));
+        panel.setOutlineThickness(2.f);
+        panel.setOutlineColor(sf::Color(165, 135, 70));
+        window.draw(panel);
         window.draw(helpText_);
         if (loadBackButton_) {
             loadBackButton_->render(window);

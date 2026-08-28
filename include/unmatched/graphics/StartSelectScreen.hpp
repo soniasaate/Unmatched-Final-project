@@ -9,6 +9,7 @@ namespace unmatched::gfx {
 class StartSelectScreen : public Screen {
 public:
     StartSelectScreen(Application& app, int playerOneAge, int playerTwoAge, int fighter1Index, int fighter2Index);
+    StartSelectScreen(Application& app, int playerOneAge, int playerTwoAge, int fighter1Index, int fighter2Index, int firstPlayerIndex);
     void handleEvent(const sf::Event& event) override;
     void update(float deltaSeconds) override;
     void render(sf::RenderWindow& window) override;
@@ -25,7 +26,7 @@ private:
     sf::Text statusText_;
     std::vector<Button> buttons_;
     std::unique_ptr<Button> backButton_;
-    int playerOneAge_, playerTwoAge_, fighter1Index_, fighter2Index_, selectedSlot_;
+    int playerOneAge_, playerTwoAge_, fighter1Index_, fighter2Index_, selectedSlot_, firstPlayerIndex_;
     std::string statusMessage_;
 };
 }

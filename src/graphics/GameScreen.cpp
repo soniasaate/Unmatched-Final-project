@@ -11,6 +11,7 @@
 #include <sstream>
 #include <fstream>
 #include <unordered_map>
+#include <filesystem>
 
 namespace unmatched::gfx {
 
@@ -48,6 +49,35 @@ constexpr float kControlRowY = kBoardY + kBoardH + 10.f;
 constexpr float kControlRowH = 38.f;
 constexpr float kStatusY = kControlRowY + kControlRowH + 8.f;
 constexpr float kCardBackW = 74.f, kCardBackH = 100.f;
+
+std::string wrapCommaList(const std::string& text, int itemsPerLine) {
+    std::size_t colon = text.find(':');
+    if (colon == std::string::npos) return text;
+    std::string prefix = text.substr(0, colon + 1);
+    std::string rest = text.substr(colon + 1);
+    while (!rest.empty() && rest.front() == ' ') rest.erase(rest.begin());
+    if (rest.empty() || rest == "(empty)") return text;
+
+    std::vector<std::string> items;
+    std::stringstream stream(rest);
+    std::string item;
+    while (std::getline(stream, item, ',')) {
+        while (!item.empty() && item.front() == ' ') item.erase(item.begin());
+        while (!item.empty() && item.back() == ' ') item.pop_back();
+        if (!item.empty()) items.push_back(item);
+    }
+    if (items.empty()) return text;
+
+    std::string result = prefix + " ";
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        if (i > 0) {
+            if (itemsPerLine > 0 && i % static_cast<std::size_t>(itemsPerLine) == 0) result += "\n";
+            else result += ", ";
+        }
+        result += items[i];
+    }
+    return result;
+}
 }
 
 GameScreen::UiButton::UiButton(sf::Font& font, const std::string& label,
@@ -55,6 +85,9 @@ GameScreen::UiButton::UiButton(sf::Font& font, const std::string& label,
     : text(font), background(size), bounds(position, size) {
     text.setString(label);
     text.setCharacterSize(12);
+    while (text.getCharacterSize() > 8 && text.getLocalBounds().size.x > size.x - 12.f) {
+        text.setCharacterSize(text.getCharacterSize() - 1);
+    }
     text.setFillColor(kTextLight);
     background.setPosition(position);
     background.setFillColor(sf::Color(24, 22, 20, 245));
@@ -107,6 +140,11 @@ sf::Color GameScreen::accentColorFor(const Fighter& hero) const {
 
 GameScreen::GameScreen(Application& app, int playerOneAge, int playerTwoAge,
                        int fighter1Index, int fighter2Index, int youngerStartSlot)
+    : GameScreen(app, playerOneAge, playerTwoAge, fighter1Index, fighter2Index, youngerStartSlot, -1) {
+}
+
+GameScreen::GameScreen(Application& app, int playerOneAge, int playerTwoAge,
+                       int fighter1Index, int fighter2Index, int youngerStartSlot, int firstPlayerIndex)
     : Screen(app)
     , background_(app_.resources().getTexture("assets/images/menu_background.jpg"))
     , titleText_(app_.resources().getFont("assets/fonts/title_font.ttf"))
@@ -119,7 +157,8 @@ GameScreen::GameScreen(Application& app, int playerOneAge, int playerTwoAge,
     controller_.startNewGame(playerOneAge, playerTwoAge,
                              createFighterByIndex(fighter1Index),
                              createFighterByIndex(fighter2Index),
-                             youngerStartSlot);
+                             youngerStartSlot,
+                             firstPlayerIndex);
 
     enterMode(Mode::Idle);
 }
@@ -136,12 +175,13 @@ GameScreen::GameScreen(Application& app, int loadSlot)
 
     try {
         controller_.loadGame(loadSlot);
+        loadGraphicsState(loadSlot);
         setStatus("Saved game loaded.");
     } catch (const std::exception& e) {
         setError(std::string("Could not load saved game: ") + e.what());
     }
 
-    enterMode(Mode::Idle);
+    enterMode(mode_);
 }
 
 void GameScreen::setupCommonVisuals() {
@@ -216,39 +256,23 @@ void GameScreen::computeSpacePositions() {
 }
 
 void GameScreen::handleEvent(const sf::Event& event) {
-    if (mode_ == Mode::GameOver) {
-        if (backToMenuButton_) backToMenuButton_->handleEvent(event);
-        return;
-    }
-    if (mode_ == Mode::InfoPopup) {
-        if (infoOkButton_) infoOkButton_->handleEvent(event);
-        return;
-    }
-
     if (const auto* keyEvent = event.getIf<sf::Event::KeyPressed>()) {
         if (keyEvent->code == sf::Keyboard::Key::Z) {
-            if (mode_ != Mode::Idle && mode_ != Mode::GameOver && mode_ != Mode::InfoPopup) {
-                maneuverBegun_ = false;
-                pendingSchemeHandIndex_ = -1;
-                selectedAttackCardIndex_ = -1;
-                selectedFighterId_.clear();
-                selectedTargetId_.clear();
-                codedNotesSelection_.clear();
+            if (shouldCancelModeBeforeUndo()) {
+                resetTransientSelection();
                 enterMode(Mode::Idle);
                 setStatus("Action canceled.");
-            } 
-            else if (mode_ == Mode::Idle) {
-                if (controller_.canUndo()) {
-                    try {
-                        controller_.undoLastAction();
-                        setStatus("Last action undone.");
-                        enterMode(Mode::Idle);
-                    } catch (const std::exception& e) {
-                        setError(std::string("Undo failed: ") + e.what());
-                    }
-                } else {
-                    setError("Cannot undo: start of turn reached or action already resolved.");
+            } else if (controller_.canUndo()) {
+                try {
+                    controller_.undoLastAction();
+                    resetTransientSelection();
+                    setStatus("Last action undone.");
+                    enterMode(Mode::Idle);
+                } catch (const std::exception& e) {
+                    setError(std::string("Undo failed: ") + e.what());
                 }
+            } else {
+                setError("Cannot undo: start of turn reached or action already resolved.");
             }
             return;
         }
@@ -260,6 +284,15 @@ void GameScreen::handleEvent(const sf::Event& event) {
             onLoadClicked();
             return;
         }
+    }
+
+    if (mode_ == Mode::GameOver) {
+        if (backToMenuButton_) backToMenuButton_->handleEvent(event);
+        return;
+    }
+    if (mode_ == Mode::InfoPopup) {
+        if (infoOkButton_) infoOkButton_->handleEvent(event);
+        return;
     }
 
     try {
@@ -1151,7 +1184,16 @@ void GameScreen::renderInfoPopup(sf::RenderWindow& window) {
     dim.setFillColor(sf::Color(0, 0, 0, 160));
     window.draw(dim);
 
-    float w = 560.f, h = 260.f;
+    std::string message = infoPopupMessage_;
+    if (infoPopupTitle_ == "STUDY METHODS") message = wrapCommaList(message, 3);
+    if (infoPopupTitle_ == "CONFIRM SUSPICION") message = wrapCommaList(message, 2);
+
+    int lines = 1;
+    for (char c : message) {
+        if (c == '\n') ++lines;
+    }
+
+    float w = 640.f, h = std::max(260.f, 150.f + static_cast<float>(lines) * 24.f);
     float x = (static_cast<float>(app_.window().getSize().x) - w) / 2.f;
     float y = (static_cast<float>(app_.window().getSize().y) - h) / 2.f;
 
@@ -1171,7 +1213,7 @@ void GameScreen::renderInfoPopup(sf::RenderWindow& window) {
     window.draw(title);
 
     sf::Text body(app_.resources().getFont("assets/fonts/title_font.ttf"));
-    body.setString(infoPopupMessage_);
+    body.setString(message);
     body.setCharacterSize(12);
     body.setFillColor(kTextLight);
     body.setPosition(sf::Vector2f(x + 20.f, y + 60.f));
@@ -1474,9 +1516,30 @@ void GameScreen::enterMode(Mode mode) {
         case Mode::SchemeSelectOpponentCard: {
             auto indexes = controller_.opponentHandChoicesForScheme(pendingSchemeHandIndex_);
             std::vector<std::string> labels;
-            for (std::size_t i = 0; i < indexes.size(); ++i) labels.push_back("Card #" + std::to_string(i + 1));
+            const auto& hand = controller_.opponentPlayer().hand();
+            for (int idx : indexes) labels.push_back(cardListLabel(hand.at(static_cast<std::size_t>(idx))));
             rebuildChipButtons(labels, [this, indexes](int i) { onSchemeOpponentCardChosen(i, indexes); });
             setStatus("Choose one of the opponent's hand cards.");
+            break;
+        }
+
+        case Mode::ConfirmSuspicionCardChoice: {
+            auto matching = controller_.getMatchingCardIndicesForConfirmSuspicion(pendingSchemeChoice_.namedValue);
+            std::vector<std::string> labels;
+            const auto& opponentHand = controller_.opponentPlayer().hand();
+            for (int idx : matching) labels.push_back(cardListLabel(opponentHand.at(static_cast<std::size_t>(idx))));
+            rebuildChipButtons(labels, [this, matching](int i) {
+                controller_.applyConfirmSuspicion(matching[static_cast<std::size_t>(i)]);
+                Player& current = controller_.currentPlayer();
+                Card played = current.removeCardFromHand(pendingSchemeHandIndex_);
+                current.addToDiscard(std::move(played));
+                controller_.decrementActions();
+                controller_.endTurnIfNeeded();
+                pendingSchemeHandIndex_ = -1;
+                setStatus("Confirm Suspicion resolved.");
+                enterMode(Mode::Idle);
+            });
+            setStatus("A matching card was found -- choose which one to burn.");
             break;
         }
 
@@ -1884,6 +1947,7 @@ void GameScreen::onUndoClicked() {
     }
     try {
         controller_.undoLastAction();
+        resetTransientSelection();
         setStatus("Last action undone.");
     } catch (const std::exception& e) {
         setError(e.what());
@@ -1894,6 +1958,7 @@ void GameScreen::onUndoClicked() {
 void GameScreen::onSaveClicked() {
     try {
         controller_.saveGame();
+        saveGraphicsState(1);
         setStatus("Game saved.");
     } catch (const std::exception& e) {
         setError(e.what());
@@ -1922,26 +1987,27 @@ void GameScreen::onLoadClicked() {
 void GameScreen::onLoadSlotChosen(int slot) {
     try {
         controller_.loadGame(slot);
-        maneuverBegun_ = false;
-        selectedFighterId_.clear();
-        selectedTargetId_.clear();
-        selectedRaveningFighterId_.clear();
-        selectedBeastFormBoostIndexes_.clear();
+        if (!loadGraphicsState(slot)) resetTransientSelection();
         setStatus("Saved game loaded.");
     } catch (const std::exception& e) {
         setError(e.what());
     }
-    enterMode(Mode::Idle);
+    enterMode(mode_);
 }
 
 void GameScreen::onHelpClicked() {
     infoPopupTitle_ = "HELP";
     infoPopupMessage_ =
-        "Actions: Maneuver, Attack, Scheme.\n"
-        "Maneuver draws 1 card, then movement may be boosted.\n"
-        "Attack needs a legal attacker, target, and attack card.\n"
-        "Schemes resolve their card effect immediately.\n"
-        "Shortcuts: S Save, L Load, Z Undo.";
+        "TURN\n"
+        "Each player has 2 actions: Maneuver, Attack, or Scheme.\n\n"
+        "MANEUVER\n"
+        "Draw 1 card, optionally boost movement, then move your fighters.\n\n"
+        "ATTACK\n"
+        "Choose attacker, target, attack card, then defender may choose defense.\n\n"
+        "SCHEME\n"
+        "Choose a scheme card and complete its prompted effect.\n\n"
+        "SHORTCUTS\n"
+        "S Save    L Load    Z Undo";
     enterMode(Mode::InfoPopup);
 }
 
@@ -2198,20 +2264,7 @@ void GameScreen::onSchemeNamedValueChosen(int index, const std::vector<int>& val
             enterMode(Mode::Idle);
             return;
         }
-        std::vector<std::string> labels;
-        for (std::size_t i = 0; i < matching.size(); ++i) labels.push_back("Card #" + std::to_string(i + 1));
-        rebuildChipButtons(labels, [this, matching](int i) {
-            controller_.applyConfirmSuspicion(matching[static_cast<std::size_t>(i)]);
-            Player& current = controller_.currentPlayer();
-            Card played = current.removeCardFromHand(pendingSchemeHandIndex_);
-            current.addToDiscard(std::move(played));
-            controller_.decrementActions();
-            controller_.endTurnIfNeeded();
-            pendingSchemeHandIndex_ = -1;
-            setStatus("Confirm Suspicion resolved.");
-            enterMode(Mode::Idle);
-        });
-        setStatus("A matching card was found -- choose which one to burn.");
+        enterMode(Mode::ConfirmSuspicionCardChoice);
         return;
     }
 
@@ -2567,6 +2620,129 @@ bool GameScreen::handleBoardClick(sf::Vector2f point) {
         }
     }
     return false;
+}
+
+bool GameScreen::shouldCancelModeBeforeUndo() const {
+    switch (mode_) {
+        case Mode::ManeuverSelectBoost:
+        case Mode::AttackSelectAttacker:
+        case Mode::AttackSelectCard:
+        case Mode::AttackBeastBoost:
+        case Mode::AttackSelectTarget:
+        case Mode::AttackSelectDefenseCard:
+        case Mode::AttackElementaryPrediction:
+        case Mode::SchemeSelectCard:
+        case Mode::SchemeSelectTarget:
+        case Mode::SchemeSelectDestination:
+        case Mode::SchemeSelectNamedValue:
+        case Mode::SchemeSelectOpponentCard:
+        case Mode::ConfirmSuspicionCardChoice:
+        case Mode::SchemeStepLightlyTarget:
+        case Mode::DraculaAbilityTarget:
+        case Mode::DiscardSelectCard:
+        case Mode::LoadGame:
+            return true;
+        case Mode::ManeuverSelectFighter:
+        case Mode::ManeuverSelectDestination:
+            return !maneuverBegun_;
+        default:
+            return false;
+    }
+}
+
+void GameScreen::resetTransientSelection() {
+    maneuverBegun_ = false;
+    pendingBoostIndex_ = -1;
+    pendingFogTokenIndex_ = -1;
+    pendingConfoundFogIndex_ = -1;
+    pendingSchemeHandIndex_ = -1;
+    pendingSchemeKind_ = SchemeChoiceKind::None;
+    pendingSchemeChoice_ = SchemeChoice{};
+    selectedFighterId_.clear();
+    selectedTargetId_.clear();
+    selectedRaveningFighterId_.clear();
+    selectedAttackCardIndex_ = -1;
+    selectedDefenseCardIndex_ = -1;
+    selectedBeastFormBoostIndexes_.clear();
+    codedNotesSelection_.clear();
+    openedHandPlayer_.reset();
+    openedDiscardPlayer_.reset();
+    hoveredCard_.reset();
+}
+
+json GameScreen::serializeGraphicsState() const {
+    json j;
+    j["mode"] = static_cast<int>(mode_);
+    j["infoPopupMessage"] = infoPopupMessage_;
+    j["infoPopupTitle"] = infoPopupTitle_;
+    j["pendingBoostIndex"] = pendingBoostIndex_;
+    j["pendingFogTokenIndex"] = pendingFogTokenIndex_;
+    j["pendingConfoundFogIndex"] = pendingConfoundFogIndex_;
+    j["pendingSchemeHandIndex"] = pendingSchemeHandIndex_;
+    j["pendingSchemeKind"] = static_cast<int>(pendingSchemeKind_);
+    j["selectedFighterId"] = selectedFighterId_;
+    j["selectedTargetId"] = selectedTargetId_;
+    j["selectedRaveningFighterId"] = selectedRaveningFighterId_;
+    j["selectedAttackCardIndex"] = selectedAttackCardIndex_;
+    j["selectedDefenseCardIndex"] = selectedDefenseCardIndex_;
+    j["selectedBeastFormBoostIndexes"] = selectedBeastFormBoostIndexes_;
+    j["codedNotesSelection"] = codedNotesSelection_;
+    j["maneuverBegun"] = maneuverBegun_;
+    if (openedHandPlayer_) j["openedHandPlayer"] = *openedHandPlayer_;
+    if (openedDiscardPlayer_) j["openedDiscardPlayer"] = *openedDiscardPlayer_;
+    json choice;
+    choice["destinationSpace"] = pendingSchemeChoice_.destinationSpace;
+    choice["targetFighterId"] = pendingSchemeChoice_.targetFighterId;
+    choice["namedValue"] = pendingSchemeChoice_.namedValue;
+    choice["opponentHandIndex"] = pendingSchemeChoice_.opponentHandIndex;
+    j["pendingSchemeChoice"] = choice;
+    return j;
+}
+
+void GameScreen::deserializeGraphicsState(const json& j) {
+    mode_ = static_cast<Mode>(j.value("mode", static_cast<int>(Mode::Idle)));
+    infoPopupMessage_ = j.value("infoPopupMessage", "");
+    infoPopupTitle_ = j.value("infoPopupTitle", "");
+    pendingBoostIndex_ = j.value("pendingBoostIndex", -1);
+    pendingFogTokenIndex_ = j.value("pendingFogTokenIndex", -1);
+    pendingConfoundFogIndex_ = j.value("pendingConfoundFogIndex", -1);
+    pendingSchemeHandIndex_ = j.value("pendingSchemeHandIndex", -1);
+    pendingSchemeKind_ = static_cast<SchemeChoiceKind>(j.value("pendingSchemeKind", static_cast<int>(SchemeChoiceKind::None)));
+    selectedFighterId_ = j.value("selectedFighterId", "");
+    selectedTargetId_ = j.value("selectedTargetId", "");
+    selectedRaveningFighterId_ = j.value("selectedRaveningFighterId", "");
+    selectedAttackCardIndex_ = j.value("selectedAttackCardIndex", -1);
+    selectedDefenseCardIndex_ = j.value("selectedDefenseCardIndex", -1);
+    selectedBeastFormBoostIndexes_ = j.value("selectedBeastFormBoostIndexes", std::vector<int>{});
+    codedNotesSelection_ = j.value("codedNotesSelection", std::vector<int>{});
+    maneuverBegun_ = j.value("maneuverBegun", false);
+    openedHandPlayer_.reset();
+    openedDiscardPlayer_.reset();
+    if (j.contains("openedHandPlayer")) openedHandPlayer_ = j["openedHandPlayer"].get<int>();
+    if (j.contains("openedDiscardPlayer")) openedDiscardPlayer_ = j["openedDiscardPlayer"].get<int>();
+    pendingSchemeChoice_ = SchemeChoice{};
+    if (j.contains("pendingSchemeChoice")) {
+        const auto& choice = j["pendingSchemeChoice"];
+        pendingSchemeChoice_.destinationSpace = choice.value("destinationSpace", -1);
+        pendingSchemeChoice_.targetFighterId = choice.value("targetFighterId", "");
+        pendingSchemeChoice_.namedValue = choice.value("namedValue", -1);
+        pendingSchemeChoice_.opponentHandIndex = choice.value("opponentHandIndex", -1);
+    }
+}
+
+void GameScreen::saveGraphicsState(int slot) const {
+    std::ofstream file("gfx_state" + std::to_string(slot) + ".json");
+    file << serializeGraphicsState().dump(4);
+}
+
+bool GameScreen::loadGraphicsState(int slot) {
+    std::string filename = "gfx_state" + std::to_string(slot) + ".json";
+    if (!std::filesystem::exists(filename)) return false;
+    std::ifstream file(filename);
+    json j;
+    file >> j;
+    deserializeGraphicsState(j);
+    return true;
 }
 
 void GameScreen::setStatus(const std::string& message) {

@@ -2,8 +2,10 @@
 #include "unmatched/Dracula.hpp"
 #include "unmatched/Sherlock.hpp"
 #include "unmatched/InvisibleMan.hpp"
+#include "unmatched/Factories.hpp"
 #include <fstream>
 #include <filesystem>
+#include <algorithm>
 
 namespace unmatched {
 
@@ -23,17 +25,34 @@ json cardToJson(const Card& card) {
 }
 
 Card jsonToCard(const json& j) {
-    return Card(
-        j["id"].get<std::string>(),
-        j["title"].get<std::string>(),
-        static_cast<Character>(j["owner"].get<int>()),
-        static_cast<CardType>(j["type"].get<int>()),
-        j["attack"].get<int>(),
-        j["defense"].get<int>(),
-        j["boost"].get<int>(),
-        static_cast<Timing>(j["timing"].get<int>()),
-        nullptr
-    );
+    std::vector<Card> allCards;
+    auto dracula = DeckFactory().createDeckForDracula();
+    auto sherlock = DeckFactory().createDeckForSherlock();
+    auto invisible = DeckFactory().createDeckForInvisibleMan();
+    allCards.insert(allCards.end(), dracula.begin(), dracula.end());
+    allCards.insert(allCards.end(), sherlock.begin(), sherlock.end());
+    allCards.insert(allCards.end(), invisible.begin(), invisible.end());
+
+    const std::string title = j["title"].get<std::string>();
+    Character owner = static_cast<Character>(j["owner"].get<int>());
+    CardType type = static_cast<CardType>(j["type"].get<int>());
+    int attack = j["attack"].get<int>();
+    int defense = j["defense"].get<int>();
+    int boost = j["boost"].get<int>();
+    Timing timing = static_cast<Timing>(j["timing"].get<int>());
+
+    auto it = std::find_if(allCards.begin(), allCards.end(), [&](const Card& card) {
+        return card.getTitle() == title &&
+               card.getOwner() == owner &&
+               card.getType() == type &&
+               card.getAttack() == attack &&
+               card.getDefense() == defense &&
+               card.getBoost() == boost &&
+               card.getTiming() == timing;
+    });
+    if (it != allCards.end()) return *it;
+
+    return Card(j["id"].get<std::string>(), title, owner, type, attack, defense, boost, timing, nullptr);
 }
 
 json cardsToJson(const std::vector<Card>& cards) {
@@ -102,6 +121,7 @@ std::unique_ptr<Fighter> jsonToFighter(const json& j) {
             }
             inv->placeFogTokens(tokens);
         }
+        inv->setStartTurnSpace(j.value("startTurnSpace", j.value("spaceId", -1)));
     } else {
         std::string id = j["id"].get<std::string>();
         std::string displayName = j.value("displayName", id);
@@ -146,6 +166,12 @@ void rotateSaveFiles() {
         }
         fs::rename("tui_state2.json", "tui_state3.json", ec);
     }
+    if (fs::exists("gfx_state2.json", ec)) {
+        if (fs::exists("gfx_state3.json", ec)) {
+            fs::remove("gfx_state3.json", ec);
+        }
+        fs::rename("gfx_state2.json", "gfx_state3.json", ec);
+    }
 
     // شیفت اسلات ۱ به اسلات ۲
     if (fs::exists("save1.json", ec)) {
@@ -159,6 +185,12 @@ void rotateSaveFiles() {
             fs::remove("tui_state2.json", ec);
         }
         fs::rename("tui_state1.json", "tui_state2.json", ec);
+    }
+    if (fs::exists("gfx_state1.json", ec)) {
+        if (fs::exists("gfx_state2.json", ec)) {
+            fs::remove("gfx_state2.json", ec);
+        }
+        fs::rename("gfx_state1.json", "gfx_state2.json", ec);
     }
 }
 

@@ -2,6 +2,7 @@
 #include "unmatched/graphics/FighterSelectScreen.hpp"
 #include "unmatched/graphics/MainMenuScreen.hpp"
 #include <cctype>
+#include <random>
 
 namespace unmatched::gfx {
 
@@ -9,7 +10,7 @@ AgeSetupScreen::AgeSetupScreen(Application& app)
     : Screen(app), background_(app_.resources().getTexture("assets/images/menu_background.jpg"))
     , title_(app_.resources().getFont("assets/fonts/title_font.ttf")), ageText_(app_.resources().getFont("assets/fonts/title_font.ttf"))
     , statusText_(app_.resources().getFont("assets/fonts/title_font.ttf"))
-    , playerIndex_(0), ageInput_(""), errorMessage_(""), playerOneAge_(0), playerTwoAge_(0) {
+    , playerIndex_(0), ageInput_(""), errorMessage_(""), playerOneAge_(0), playerTwoAge_(0), firstPlayerIndex_(-1) {
 
     fitBackgroundToWindow();
     title_.setString("ENTER AGES");
@@ -98,7 +99,15 @@ void AgeSetupScreen::onOK() {
         updateAgeText(); errorMessage_ = "";
     } else {
         playerTwoAge_ = age;
-        app_.setScreen(std::make_unique<FighterSelectScreen>(app_, playerOneAge_, playerTwoAge_));
+        if (playerOneAge_ == playerTwoAge_) {
+            static std::random_device rd;
+            static std::mt19937 rng(rd());
+            std::uniform_int_distribution<int> dist(0, 1);
+            firstPlayerIndex_ = dist(rng);
+        } else {
+            firstPlayerIndex_ = playerOneAge_ < playerTwoAge_ ? 0 : 1;
+        }
+        app_.setScreen(std::make_unique<FighterSelectScreen>(app_, playerOneAge_, playerTwoAge_, firstPlayerIndex_));
     }
 }
 void AgeSetupScreen::onBack() { app_.setScreen(std::make_unique<MainMenuScreen>(app_)); }

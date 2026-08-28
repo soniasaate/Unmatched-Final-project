@@ -20,6 +20,8 @@ class GameScreen : public Screen {
 public:
     GameScreen(Application& app, int playerOneAge, int playerTwoAge,
                int fighter1Index, int fighter2Index, int youngerStartSlot);
+    GameScreen(Application& app, int playerOneAge, int playerTwoAge,
+               int fighter1Index, int fighter2Index, int youngerStartSlot, int firstPlayerIndex);
     
     GameScreen(Application& app, int loadSlot);
     ~GameScreen() override = default;
@@ -45,6 +47,7 @@ private:
         SchemeSelectDestination,
         SchemeSelectNamedValue,
         SchemeSelectOpponentCard,
+        ConfirmSuspicionCardChoice,
         SchemeStepLightlyTarget,
         RaveningTarget,
         RaveningDestination,
@@ -197,6 +200,12 @@ private:
     bool handleBoardClick(sf::Vector2f point);
 
     void checkAutoPrompts();
+    bool shouldCancelModeBeforeUndo() const;
+    void resetTransientSelection();
+    void saveGraphicsState(int slot) const;
+    bool loadGraphicsState(int slot);
+    json serializeGraphicsState() const;
+    void deserializeGraphicsState(const json& j);
     void setStatus(const std::string& message);
     void setError(const std::string& message);
 

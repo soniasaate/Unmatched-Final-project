@@ -54,6 +54,10 @@ public:
 
 private:
     void centerText() {
+        unsigned int size = text_.getCharacterSize();
+        while (size > 12 && text_.getLocalBounds().size.x > size_.x - 18.f) {
+            text_.setCharacterSize(--size);
+        }
         sf::FloatRect bounds = text_.getLocalBounds();
         text_.setOrigin(sf::Vector2f(bounds.position.x + bounds.size.x / 2.f, bounds.position.y + bounds.size.y / 2.f));
         text_.setPosition(sf::Vector2f(shape_.getPosition().x + size_.x / 2.f, shape_.getPosition().y + size_.y / 2.f));

@@ -26,6 +26,7 @@ public:
     int getDefenseBonus() const { return 1; }
     void onTurnStart() override;
     int getStartTurnSpace() const { return startTurnSpace_; }
+    void setStartTurnSpace(int spaceId) { startTurnSpace_ = spaceId; }
 
 private:
     std::vector<int> fogTokens_;

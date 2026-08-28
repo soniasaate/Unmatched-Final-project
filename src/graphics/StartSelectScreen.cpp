@@ -5,20 +5,24 @@
 namespace unmatched::gfx {
 
 StartSelectScreen::StartSelectScreen(Application& app, int playerOneAge, int playerTwoAge, int fighter1Index, int fighter2Index)
+    : StartSelectScreen(app, playerOneAge, playerTwoAge, fighter1Index, fighter2Index, playerOneAge <= playerTwoAge ? 0 : 1) {
+}
+
+StartSelectScreen::StartSelectScreen(Application& app, int playerOneAge, int playerTwoAge, int fighter1Index, int fighter2Index, int firstPlayerIndex)
     : Screen(app), background_(app_.resources().getTexture("assets/images/menu_background.jpg"))
     , title_(app_.resources().getFont("assets/fonts/title_font.ttf")), subtitle_(app_.resources().getFont("assets/fonts/title_font.ttf"))
     , statusText_(app_.resources().getFont("assets/fonts/title_font.ttf"))
     , playerOneAge_(playerOneAge), playerTwoAge_(playerTwoAge)
-    , fighter1Index_(fighter1Index), fighter2Index_(fighter2Index), selectedSlot_(-1) {
+    , fighter1Index_(fighter1Index), fighter2Index_(fighter2Index), selectedSlot_(-1), firstPlayerIndex_(firstPlayerIndex) {
 
     fitBackgroundToWindow();
     title_.setString("CHOOSE START POSITION");
     title_.setCharacterSize(48); title_.setFillColor(sf::Color(200, 30, 30)); title_.setStyle(sf::Text::Bold);
     centerTitle();
 
-    std::string youngerName = (playerOneAge_ <= playerTwoAge_) ? "Player 1" : "Player 2";
+    std::string youngerName = firstPlayerIndex_ == 0 ? "Player 1" : "Player 2";
     std::string fighterNames[] = {"Dracula", "Sherlock Holmes", "Invisible Man"};
-    std::string youngerFighter = fighterNames[(playerOneAge_ <= playerTwoAge_) ? fighter1Index_ : fighter2Index_];
+    std::string youngerFighter = fighterNames[firstPlayerIndex_ == 0 ? fighter1Index_ : fighter2Index_];
     subtitle_.setString(youngerName + " (" + youngerFighter + ") chooses start space");
     subtitle_.setCharacterSize(28); subtitle_.setFillColor(sf::Color(190, 180, 160));
     centerSubtitle();
@@ -71,9 +75,9 @@ void StartSelectScreen::onSlotSelected(int slot) {
     startGame();
 }
 void StartSelectScreen::startGame() {
-    app_.setScreen(std::make_unique<GameScreen>(app_, playerOneAge_, playerTwoAge_, fighter1Index_, fighter2Index_, selectedSlot_));
+    app_.setScreen(std::make_unique<GameScreen>(app_, playerOneAge_, playerTwoAge_, fighter1Index_, fighter2Index_, selectedSlot_, firstPlayerIndex_));
 }
 void StartSelectScreen::onBack() {
-    app_.setScreen(std::make_unique<FighterSelectScreen>(app_, playerOneAge_, playerTwoAge_));
+    app_.setScreen(std::make_unique<FighterSelectScreen>(app_, playerOneAge_, playerTwoAge_, firstPlayerIndex_));
 }
 }

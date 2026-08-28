@@ -6,9 +6,14 @@
 namespace unmatched::gfx {
 
 FighterSelectScreen::FighterSelectScreen(Application& app, int playerOneAge, int playerTwoAge)
+    : FighterSelectScreen(app, playerOneAge, playerTwoAge, playerOneAge <= playerTwoAge ? 0 : 1) {
+}
+
+FighterSelectScreen::FighterSelectScreen(Application& app, int playerOneAge, int playerTwoAge, int firstPlayerIndex)
     : Screen(app), background_(app_.resources().getTexture("assets/images/menu_background.jpg"))
     , title_(app_.resources().getFont("assets/fonts/title_font.ttf")), subtitle_(app_.resources().getFont("assets/fonts/title_font.ttf"))
     , statusText_(app_.resources().getFont("assets/fonts/title_font.ttf")), playerOneAge_(playerOneAge), playerTwoAge_(playerTwoAge)
+    , firstPlayerIndex_(firstPlayerIndex)
     , selectionPhase_(0), selectedFighter1_(-1), selectedFighter2_(-1), logosLoaded_(false) {
 
     fighterNames_.reserve(3); fighterLogos_.reserve(3);
@@ -67,7 +72,7 @@ FighterSelectScreen::FighterSelectScreen(Application& app, int playerOneAge, int
     sf::Font& buttonFont = app_.resources().getFont("assets/fonts/title_font.ttf");
     buttons_.emplace_back(buttonFont, "BACK", sf::Vector2f(50.f, 660.f), sf::Vector2f(120.f, 45.f));
     buttons_.back().onClick = [this]() { onBack(); };
-    buttons_.emplace_back(buttonFont, "CONFIRM", sf::Vector2f(windowSize.x - 170.f, 660.f), sf::Vector2f(120.f, 45.f));
+    buttons_.emplace_back(buttonFont, "CONFIRM", sf::Vector2f(windowSize.x - 190.f, 660.f), sf::Vector2f(150.f, 45.f));
     buttons_.back().onClick = [this]() { onConfirm(); };
     buttons_.back().setEnabled(false);
 
@@ -107,11 +112,11 @@ void FighterSelectScreen::centerSubtitle() {
 }
 void FighterSelectScreen::updateStatus() {
     if (selectionPhase_ == 0) {
-        int firstPlayer = (playerOneAge_ <= playerTwoAge_) ? 1 : 2;
+        int firstPlayer = firstPlayerIndex_ + 1;
         title_.setString("PLAYER " + std::to_string(firstPlayer) + ", CHOOSE YOUR LEGEND");
-        statusMessage_ = "PLAYER " + std::to_string(firstPlayer) + " (YOUNGER) SELECTS FIRST";
+        statusMessage_ = "PLAYER " + std::to_string(firstPlayer) + " SELECTS FIRST";
     } else if (selectionPhase_ == 1) {
-        int secondPlayer = (playerOneAge_ <= playerTwoAge_) ? 2 : 1;
+        int secondPlayer = (1 - firstPlayerIndex_) + 1;
         title_.setString("PLAYER " + std::to_string(secondPlayer) + ", CHOOSE YOUR LEGEND");
         statusMessage_ = "PLAYER " + std::to_string(secondPlayer) + " SELECTS THEIR FIGHTER";
     } else {
@@ -132,7 +137,12 @@ void FighterSelectScreen::onFighterSelected(int index) {
     }
 }
 void FighterSelectScreen::onConfirm() {
-    if (selectionPhase_ == 2) app_.setScreen(std::make_unique<StartSelectScreen>(app_, playerOneAge_, playerTwoAge_, selectedFighter1_, selectedFighter2_));
+    if (selectionPhase_ == 2) {
+        bool playerOneFirst = firstPlayerIndex_ == 0;
+        int playerOneFighter = playerOneFirst ? selectedFighter1_ : selectedFighter2_;
+        int playerTwoFighter = playerOneFirst ? selectedFighter2_ : selectedFighter1_;
+        app_.setScreen(std::make_unique<StartSelectScreen>(app_, playerOneAge_, playerTwoAge_, playerOneFighter, playerTwoFighter, firstPlayerIndex_));
+    }
 }
 void FighterSelectScreen::onBack() {
     if (selectionPhase_ > 0) {

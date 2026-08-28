@@ -255,7 +255,7 @@ std::vector<Card> DeckFactory::createDeckForInvisibleMan() const {
     addCopies(2, "EMERGE FROM MIST", Character::InvisibleMan, CardType::Attack, 3, -1, 2, Timing::DuringCombat,
         [](Fighter& attacker, Fighter&, GameController&, int& attackValue, int&) {
             auto* invisible = dynamic_cast<InvisibleMan*>(&attacker);
-            if (invisible && invisible->isOnFog(invisible->getStartTurnSpace())) {
+            if (invisible && invisible->isOnFog(invisible->spaceId())) {
                 attackValue = 5;
             }
         });

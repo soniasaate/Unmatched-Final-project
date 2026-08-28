@@ -91,7 +91,8 @@ public:
     void startNewGame(int playerOneAge, int playerTwoAge,
                       std::unique_ptr<Fighter> hero1,
                       std::unique_ptr<Fighter> hero2,
-                      int youngerStartSlot);
+                      int youngerStartSlot,
+                      int forcedYoungerPlayerIndex = -1);
     void resetState();
     bool started() const;
     bool gameOver() const;
